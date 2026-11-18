@@ -1,7 +1,19 @@
 // biome-ignore lint/correctness/noNodejsModules: Native crypto is the intentional verification boundary.
 import { type KeyObject, verify as verifySignature } from "node:crypto";
 
-import { z } from "zod";
+import {
+  array,
+  boolean,
+  custom,
+  literal,
+  looseObject,
+  number,
+  object,
+  type output,
+  strictObject,
+  string,
+  enum as zodEnum,
+} from "zod";
 
 import { DerReader } from "../asn1/der-reader.js";
 import {
@@ -35,60 +47,51 @@ const standardBase64Pattern = /^[A-Za-z0-9+/]*={0,2}$/;
 const base64UrlPaddingPattern = /={0,2}$/u;
 const trailingPaddingPattern = /=+$/u;
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
-const claimPathSchema = z.array(z.string().min(1)).min(1);
-const oidSchema = z.string().regex(/^[012](\.(0|[1-9][0-9]*)){1,63}$/u);
-const protectedHeaderSchema = z.looseObject({ alg: z.string(), x5c: z.array(z.string()) });
-const ocspPolicySchema = z.strictObject({
-  allowedEndpoints: z.array(z.string().min(1)).optional(),
-  timeoutMs: z.number().int().positive().max(60_000).default(5_000),
-  maxResponseBytes: z
-    .number()
+const claimPathSchema = array(string().min(1)).min(1);
+const oidSchema = string().regex(/^[012](\.(0|[1-9][0-9]*)){1,63}$/u);
+const protectedHeaderSchema = looseObject({ alg: string(), x5c: array(string()) });
+const ocspPolicySchema = strictObject({
+  allowedEndpoints: array(string().min(1)).optional(),
+  timeoutMs: number().int().positive().max(60_000).default(5_000),
+  maxResponseBytes: number()
     .int()
     .positive()
     .max(16 * 1024 * 1024)
     .default(256 * 1024),
-  allowMissingNextUpdate: z.boolean().default(false),
-  maxAgeMs: z
-    .number()
+  allowMissingNextUpdate: boolean().default(false),
+  maxAgeMs: number()
     .int()
     .positive()
     .default(15 * 60 * 1000),
-  allowedSignatureAlgorithms: z
-    .array(z.string().min(1))
-    .default([
-      "1.2.840.10045.4.3.2",
-      "1.2.840.10045.4.3.3",
-      "1.2.840.10045.4.3.4",
-      "1.2.840.113549.1.1.11",
-      "1.2.840.113549.1.1.12",
-      "1.2.840.113549.1.1.13",
-    ]),
+  allowedSignatureAlgorithms: array(string().min(1)).default([
+    "1.2.840.10045.4.3.2",
+    "1.2.840.10045.4.3.3",
+    "1.2.840.10045.4.3.4",
+    "1.2.840.113549.1.1.11",
+    "1.2.840.113549.1.1.12",
+    "1.2.840.113549.1.1.13",
+  ]),
 });
 
-const verifierPolicySchema = z
-  .strictObject({
-    mode: z.enum(["offline", "online"]).default("offline"),
-    algorithm: z.literal("ES256").default("ES256"),
-    application: z.string().min(1).optional(),
-    environment: z.string().min(1).optional(),
-    claimPaths: z
-      .strictObject({
-        application: claimPathSchema.optional(),
-        environment: claimPathSchema.optional(),
-      })
-      .optional(),
-    signedTimePath: claimPathSchema.optional(),
-    requiredExtensions: z
-      .strictObject({
-        leaf: z.array(oidSchema).optional(),
-        intermediate: z.array(oidSchema).optional(),
-      })
-      .optional(),
-    ocsp: ocspPolicySchema.optional(),
-    validateClaims: z
-      .custom<NonNullable<VerifierPolicy["validateClaims"]>>((value) => typeof value === "function")
-      .optional(),
-  })
+const verifierPolicySchema = strictObject({
+  mode: zodEnum(["offline", "online"]).default("offline"),
+  algorithm: literal("ES256").default("ES256"),
+  application: string().min(1).optional(),
+  environment: string().min(1).optional(),
+  claimPaths: strictObject({
+    application: claimPathSchema.optional(),
+    environment: claimPathSchema.optional(),
+  }).optional(),
+  signedTimePath: claimPathSchema.optional(),
+  requiredExtensions: strictObject({
+    leaf: array(oidSchema).optional(),
+    intermediate: array(oidSchema).optional(),
+  }).optional(),
+  ocsp: ocspPolicySchema.optional(),
+  validateClaims: custom<NonNullable<VerifierPolicy["validateClaims"]>>(
+    (value) => typeof value === "function",
+  ).optional(),
+})
   .refine(({ application, claimPaths }) => application === undefined || !!claimPaths?.application, {
     message: "An expected application requires an explicit application claim path",
   })
@@ -96,26 +99,19 @@ const verifierPolicySchema = z
     message: "An expected environment requires an explicit environment claim path",
   });
 
-const verifierLimitsSchema = z
-  .object({
-    maxCompactJwsBytes: z.number().int().positive().default(MAX_DEFAULT_COMPACT_JWS_BYTES),
-    maxProtectedHeaderBytes: z
-      .number()
-      .int()
-      .positive()
-      .default(MAX_DEFAULT_PROTECTED_HEADER_BYTES),
-    maxPayloadBytes: z.number().int().positive().default(MAX_DEFAULT_PAYLOAD_BYTES),
-    maxX5cEntries: z.number().int().min(2).max(MAX_DEFAULT_X5C_ENTRIES).default(3),
-    maxCertificateBytes: z.number().int().positive().default(MAX_DEFAULT_CERTIFICATE_BYTES),
-    maxCacheEntries: z.number().int().positive().max(4096).default(MAX_DEFAULT_CACHE_ENTRIES),
-    cacheTtlMs: z
-      .number()
-      .int()
-      .positive()
-      .max(365 * 24 * 60 * 60 * 1000)
-      .default(MAX_DEFAULT_CACHE_TTL_MS),
-  })
-  .passthrough();
+const verifierLimitsSchema = object({
+  maxCompactJwsBytes: number().int().positive().default(MAX_DEFAULT_COMPACT_JWS_BYTES),
+  maxProtectedHeaderBytes: number().int().positive().default(MAX_DEFAULT_PROTECTED_HEADER_BYTES),
+  maxPayloadBytes: number().int().positive().default(MAX_DEFAULT_PAYLOAD_BYTES),
+  maxX5cEntries: number().int().min(2).max(MAX_DEFAULT_X5C_ENTRIES).default(3),
+  maxCertificateBytes: number().int().positive().default(MAX_DEFAULT_CERTIFICATE_BYTES),
+  maxCacheEntries: number().int().positive().max(4096).default(MAX_DEFAULT_CACHE_ENTRIES),
+  cacheTtlMs: number()
+    .int()
+    .positive()
+    .max(365 * 24 * 60 * 60 * 1000)
+    .default(MAX_DEFAULT_CACHE_TTL_MS),
+}).passthrough();
 
 const standardBase64 = (value: string, field: string): Uint8Array => {
   const paddingStart = value.indexOf("=");
@@ -442,7 +438,7 @@ export interface VerifiedJws<TPayload = unknown> {
   readonly payload: TPayload;
 }
 
-type NormalizedVerifierPolicy = z.output<typeof verifierPolicySchema>;
+type NormalizedVerifierPolicy = output<typeof verifierPolicySchema>;
 
 interface NormalizedOcspPolicy {
   readonly allowedEndpoints?: readonly string[];
