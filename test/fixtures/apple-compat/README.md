@@ -10,6 +10,7 @@ The fixtures are kept with this attribution so their provenance is visible.
 They contain example identifiers and test certificates only; no production
 tokens, user data, or private signing keys are included.
 
-The smoke test checks that the snapshots load and that the expected compatibility
-preconditions are still visible. It does not claim to perform cryptographic
-verification until the verifier implementation exists.
+Run `yarn run test:smoke:apple` to check that the verifier accepts the signed
+notification with the fixture trust anchor and policy, that the negative
+snapshots contain the expected malformed or mismatched fields, and that the
+BER receipts produce the expected extraction results.

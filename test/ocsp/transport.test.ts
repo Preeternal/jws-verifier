@@ -27,22 +27,20 @@ describe("OCSP fetch transport", () => {
     vi.unstubAllGlobals();
   });
 
-  it.each([
-    [new Response("x", { status: 500 }), 100, "returned HTTP"],
-    [
-      new Response("x", { status: 200, headers: { "content-type": "text/plain" } }),
-      100,
-      "content type",
-    ],
-    [
-      new Response("1234", {
-        status: 200,
-        headers: { "content-length": "4", "content-type": "application/ocsp-response" },
-      }),
-      3,
-      "body limit",
-    ],
-  ])("rejects unsafe response (%s)", async (response, maxBytes, message) => {
+  it.each<[ResponseInit, string]>([
+    [{ status: 500 }, "returned HTTP"],
+    [{ status: 200, headers: { "content-type": "text/plain" } }, "content type"],
+    [{ status: 200, headers: { "content-length": "4" } }, "body limit"],
+    [{ status: 200 }, "body limit"],
+  ])("cancels the body of an unsafe response (%s)", async (init, message) => {
+    const cancel = vi.fn(() => Promise.reject(new Error("cleanup failed")));
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(Uint8Array.of(1, 2, 3, 4));
+      },
+      cancel,
+    });
+    const response = new Response(body, init);
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => response),
@@ -52,9 +50,10 @@ describe("OCSP fetch transport", () => {
         "https://ocsp.example.test",
         Uint8Array.of(9),
         new AbortController().signal,
-        { maxResponseBytes: maxBytes },
+        { maxResponseBytes: 3 },
       ),
     ).rejects.toThrow(message);
+    expect(cancel).toHaveBeenCalledOnce();
     vi.unstubAllGlobals();
   });
 

@@ -36,6 +36,8 @@
     "lint": "biome check --error-on-warnings . && oxlint --deny-warnings . && oxfmt --check .",
     "attw": "attw --pack . --profile esm-only",
     "benchmark": "node --experimental-strip-types --disable-warning=ExperimentalWarning benchmark/runner.mjs",
+    "benchmark:codec": "yarn run build && node --experimental-strip-types benchmark/codec-runner.mjs",
+    "benchmark:ci": "yarn run build && yarn benchmark -- --adapter ./benchmark/verifier-adapter.mjs --baseline ./benchmark/reference-adapter.mjs --mode all --samples 15 --warmup 3 --batch 20 --json",
     "prepare": "lefthook install",
     "prepublishOnly": "yarn run check && yarn run build && yarn run verify:artifacts && yarn run publint && yarn run types:lint",
     "publint": "publint --pack yarn",
@@ -49,7 +51,8 @@
     "typecheck": "tsc --noEmit",
     "types:lint": "attw --pack . --profile esm-only",
     "verify:artifacts": "node -e \"for (const file of ['dist/index.js','dist/index.d.ts']) require('node:fs').statSync(file)\"",
-    "verify:package": "npm publish --dry-run --ignore-scripts"
+    "verify:package": "node scripts/verify-package.mjs",
+    "workerd:smoke": "yarn run build && node scripts/workerd-smoke.mjs"
   },
   "dependencies": {
     "zod": "^4.4.3"
@@ -62,7 +65,9 @@
     "@vitest/coverage-v8": "^4.1.8",
     "@yarnpkg/sdks": "^3.3.1",
     "dependency-cruiser": "^17.4.3",
+    "esbuild": "0.28.2",
     "lefthook": "^2.1.9",
+    "miniflare": "5.20261103.0-beta",
     "oxfmt": "^0.53.0",
     "oxlint": "^1.68.0",
     "publint": "^0.3.21",

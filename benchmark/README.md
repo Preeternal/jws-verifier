@@ -11,6 +11,8 @@ yarn benchmark
 yarn benchmark -- --mode warm --fixture jws.synthetic.valid-warm-hit
 yarn benchmark -- --mode cold --samples 30 --json > /tmp/jws-benchmark.json
 yarn benchmark -- --adapter ./path/to/candidate.mjs --baseline ./benchmark/reference-adapter.mjs
+yarn benchmark:ci
+yarn benchmark:codec
 ```
 
 The default adapter is a deliberately small native-crypto reference. It
@@ -86,3 +88,16 @@ outcomes and request counts alongside the timing for each sample.
 `--baseline` alternates adapter order between samples in each scenario. The
 report shows median and p95 ratios for CPU and wall time (`baseline / candidate`).
 Failed series are excluded from ratios and cause a nonzero exit status.
+
+`yarn benchmark:codec` measures X.509 chain preparation with preloaded roots,
+OCSP request encoding and response parsing, and BER receipt extraction.
+It validates each operation before timing and records CPU and wall samples.
+The receipt input is a synthetic CMS structure with an arbitrary ID and
+fragmented OCTET STRINGs.
+
+`yarn benchmark:ci` runs the built verifier on the public synthetic scenarios.
+It also reports ratios on shared, validated scenarios against the native-crypto
+reference. The reference replays OCSP without validating responses and creates
+X.509 objects even on cache hits, so those ratios reflect the specific work each
+implementation performs. CI stores the raw JSON and a Markdown summary for each
+Node.js version.

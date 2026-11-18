@@ -4,11 +4,17 @@ export interface OcspFetchOptions {
 
 const contentType = "application/ocsp-response";
 
+const cancelBody = (body: ReadableStream | ReadableStreamDefaultReader | null): void => {
+  // Cancellation is best-effort. Preserve the validation error even if cleanup fails.
+  void body?.cancel().catch(() => {});
+};
+
 const readBody = async (response: Response, maxBytes: number): Promise<Uint8Array> => {
   const declaredLength = response.headers.get("content-length");
   if (declaredLength !== null) {
     const length = Number(declaredLength);
     if (!Number.isSafeInteger(length) || length < 0 || length > maxBytes) {
+      cancelBody(response.body);
       throw new Error("OCSP response exceeds the configured body limit");
     }
   }
@@ -22,7 +28,10 @@ const readBody = async (response: Response, maxBytes: number): Promise<Uint8Arra
       const item = await reader.read();
       if (item.done) break;
       total += item.value.byteLength;
-      if (total > maxBytes) throw new Error("OCSP response exceeds the configured body limit");
+      if (total > maxBytes) {
+        cancelBody(reader);
+        throw new Error("OCSP response exceeds the configured body limit");
+      }
       chunks.push(item.value);
     }
   } finally {
@@ -56,9 +65,13 @@ export const fetchOcspResponse = async (
       "content-type": "application/ocsp-request",
     },
   });
-  if (!response.ok) throw new Error(`OCSP responder returned HTTP ${response.status}`);
+  if (!response.ok) {
+    cancelBody(response.body);
+    throw new Error(`OCSP responder returned HTTP ${response.status}`);
+  }
   const responseContentType = response.headers.get("content-type");
   if (responseContentType !== null && !responseContentType.toLowerCase().startsWith(contentType)) {
+    cancelBody(response.body);
     throw new Error("OCSP responder returned an unexpected content type");
   }
   return readBody(response, options.maxResponseBytes);

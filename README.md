@@ -3,7 +3,19 @@
 [![npm version](https://img.shields.io/npm/v/@preeternal/jws-verifier.svg)](https://www.npmjs.com/package/@preeternal/jws-verifier)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-TypeScript library for secure JWS verification, X.509 certificate chain validation, and OCSP revocation checking
+TypeScript library for verifying compact ES256 JWS with X.509 certificate chains
+and optional OCSP revocation checks.
+
+## Why this library?
+
+Use it when your application needs to verify signed messages independently of
+a provider SDK. You supply trusted roots, claim rules, and an OCSP policy. For
+example, a service that receives App Store notifications can use the verifier
+independently of its App Store Server API client.
+
+The package is ESM-only and targets Node.js 22+ and Cloudflare Workers with
+Node.js compatibility enabled. It uses `node:crypto` for signatures and
+hashing, with TypeScript parsers for certificates, OCSP, and legacy receipts.
 
 ## Install
 
@@ -17,7 +29,7 @@ yarn add @preeternal/jws-verifier
 import { createVerifier } from "@preeternal/jws-verifier";
 
 const verifier = createVerifier({
-  trustedRoots: [rootDer], // DER certificate bytes supplied by the host
+  trustedRoots: [rootDer], // Uint8Array loaded from your trusted configuration
   policy: {
     mode: "offline",
     application: "com.example.app",
@@ -30,26 +42,30 @@ const verifier = createVerifier({
 const { payload } = await verifier.verify(compactJws);
 ```
 
-Configure claim paths for the payload schema you expect. Offline verification
-uses a signed Unix millisecond timestamp at `signedTimePath` or an explicit
-`effectiveTime` passed as the second argument to `verify()`. Optional
-`requiredExtensions` lists required certificate extension OIDs by role.
-Online verification and OCSP are pending.
+Obtain DER trust anchors from your provider or your own trust configuration,
+independently of the incoming JWS. Set the claim paths and any
+`requiredExtensions` to match the signing profile your application accepts.
+The example paths are illustrative.
 
-## Development
+- **Offline** checks certificate validity at a signed Unix millisecond
+  timestamp from `signedTimePath` or at an explicit time passed as
+  `verify(compactJws, { effectiveTime })`. It performs no OCSP queries.
+- **Online** checks certificate validity against the host clock and checks
+  revocation through OCSP. Set `mode: "online"` and
+  `ocsp: { allowedEndpoints: [...] }` inside `policy`. The built-in transport
+  uses the host's `fetch`, rejects redirects, and enforces time and body-size
+  limits. To customize it, pass a top-level `ocspTransport` callback that
+  takes `{ url, body, signal }` and returns response bytes. Reuse the verifier
+  for a stable configuration to take advantage of its validation cache.
 
-Lint, format, type-check, dependency and security policy checks, and tests are
-wired into a single command:
+For legacy App Receipts, `extractTransactionIdFromAppReceipt` reads the ID
+synchronously. The extracted value alone does not establish receipt
+authenticity or purchase entitlement.
 
-```bash
-yarn run check         # lint + dep/security checks + typecheck + coverage
-yarn run test          # run tests
-yarn run setup:editor  # generate local Yarn PnP SDKs for VS Code
-yarn run build         # build to dist/
-yarn run release:check # package validation + publish dry run
-```
+## Contributing
 
-`yarn run security:lint` prefers `semgrep` on PATH and otherwise runs the pinned `uvx semgrep@1.165.0` scan.
+Development setup, checks, benchmarks, Worker startup, and pull-request
+guidance are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

@@ -1,7 +1,17 @@
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
-import process, { argv, cpuUsage, cwd, env, execPath, stderr, stdout, version } from "node:process";
+import process, {
+  argv,
+  cpuUsage,
+  cwd,
+  env,
+  execPath,
+  exit,
+  stderr,
+  stdout,
+  version,
+} from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { ocspRequestKey } from "./ocsp-replay.mjs";

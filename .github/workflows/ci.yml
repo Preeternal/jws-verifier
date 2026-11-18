@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test / ${{ matrix.os }} / Node ${{ matrix.node }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [22.x, 24.x]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn run lint
+      - run: yarn run typecheck
+      - run: yarn run test:coverage
+
+  release:
+    name: Release package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      - run: corepack enable
+      - run: yarn install --immutable
+      - name: Install uv for Semgrep
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: false
+          python-version: "3.13"
+      - run: yarn run release:check
+        env:
+          SECURITY_LINT_FORCE_UVX: "1"
+
+  benchmark:
+    name: Benchmark / Node ${{ matrix.node }}
+    needs: [test]
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22.x, 24.x]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: corepack enable
+      - run: yarn install --immutable
+      - name: Run end-to-end benchmark
+        run: yarn run benchmark:ci > benchmark.json
+      - name: Run codec benchmark
+        if: ${{ !cancelled() }}
+        run: yarn run benchmark:codec > codec.json
+      - name: Add benchmark summary
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: node scripts/benchmark-summary.mjs benchmark.json codec.json | tee benchmark.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-node-${{ matrix.node }}
+          path: |
+            benchmark.json
+            codec.json
+            benchmark.md
+
+  worker-startup:
+    name: Worker startup / workerd
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      - run: corepack enable
+      - run: yarn install --immutable
+      - name: Start workerd and measure startup
+        shell: bash
+        run: yarn run workerd:smoke | tee workerd.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workerd-smoke
+          path: workerd.json

@@ -20,6 +20,7 @@ import {
   type PreparedChain,
   prepareCertificate,
 } from "../x509/prepared-certificates.js";
+import { es256SignatureToDer } from "./es256-signature.js";
 
 const MAX_DEFAULT_COMPACT_JWS_BYTES = 1024 * 1024;
 const MAX_DEFAULT_PROTECTED_HEADER_BYTES = 16 * 1024;
@@ -598,14 +599,8 @@ const parseCompactJws = (
 const verifyJwsSignature = (parsed: ParsedCompactJws, leafKey: KeyObject): void => {
   const signingInput = Buffer.from(`${parsed.protectedSegment}.${parsed.payloadSegment}`, "ascii");
   try {
-    if (
-      !verifySignature(
-        "sha256",
-        signingInput,
-        { key: leafKey, dsaEncoding: "ieee-p1363" },
-        parsed.signature,
-      )
-    ) {
+    // workerd accepts a direct KeyObject for verify(), with a DER ECDSA signature.
+    if (!verifySignature("sha256", signingInput, leafKey, es256SignatureToDer(parsed.signature))) {
       throw new VerificationError("invalid-signature", "JWS signature is invalid");
     }
   } catch (error) {
