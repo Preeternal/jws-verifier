@@ -91,11 +91,15 @@ yarn run workerd:smoke
 
 The probe records runtime readiness before the first handler invocation, then
 verifies a signed JWS with OCSP responses replayed from memory. Its startup and
-request measurements are wall time. GitHub Actions stores the Worker JSON
-and Node 22/24 benchmark reports as workflow artifacts. For comparisons, use
-the same machine and Node version, and record the sample count and commit.
-See the [benchmark guide](benchmark/README.md) for the reference adapter and
-measurement details.
+request measurements are wall time.
+
+In GitHub Actions, open the workflow run's **Summary** for the Node benchmark
+tables. Under **Artifacts**, `benchmark-node-22.x` and `benchmark-node-24.x`
+contain the Markdown report and raw JSON. The Worker wall-time results are in
+the separate `workerd-smoke` artifact. The benchmark jobs run independently of
+the test matrix. For comparisons, use the same machine and Node version, and
+record the sample count and commit. See the [benchmark guide](benchmark/README.md)
+for the reference adapter and measurement details.
 
 ## Pull requests
 

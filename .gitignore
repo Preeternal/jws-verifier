@@ -17,3 +17,4 @@ package-lock.json
 report/
 reviews_triage/
 triage_decisions.db
+/logs_[0-9]*/

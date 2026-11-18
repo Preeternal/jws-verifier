@@ -54,7 +54,6 @@ jobs:
 
   benchmark:
     name: Benchmark / Node ${{ matrix.node }}
-    needs: [test]
     strategy:
       fail-fast: false
       matrix:
