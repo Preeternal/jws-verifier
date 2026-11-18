@@ -14,10 +14,27 @@ yarn add jws-verifier
 ## Usage
 
 ```ts
-import { formatValue } from "jws-verifier";
+import { createVerifier } from "jws-verifier";
 
-const output = formatValue({ ready: true });
+const verifier = createVerifier({
+  trustedRoots: [rootDer], // DER certificate bytes supplied by the host
+  policy: {
+    mode: "offline",
+    application: "com.example.app",
+    environment: "sandbox",
+    claimPaths: { application: ["data", "id"], environment: ["data", "environment"] },
+    signedTimePath: ["issuedAt"],
+  },
+});
+
+const { payload } = await verifier.verify(compactJws);
 ```
+
+Configure claim paths for the payload schema you expect. Offline verification
+uses a signed Unix millisecond timestamp at `signedTimePath` or an explicit
+`effectiveTime` passed as the second argument to `verify()`. Optional
+`requiredExtensions` lists required certificate extension OIDs by role.
+Online verification and OCSP are pending.
 
 ## Development
 

@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
+
+import { createVerifier } from "../../source/index.js";
 import { parseX509CertificateMetadata } from "../../source/x509/certificate-metadata.js";
 
 const fixture = (name: string): string =>
@@ -25,15 +27,32 @@ describe("Apple compatibility fixture smoke test", () => {
     const { offset, length } = metadata.subject;
     expect(leaf.subarray(offset, offset + length)).toEqual(leaf.subarray(139, 210));
   });
-  it("loads the accepted notification snapshot", () => {
-    const parts = fixture("test-notification.jws").split(".");
+  it("verifies the signed notification with the fixture trust anchor and profile", async () => {
+    const compactJws = fixture("test-notification.jws");
+    const parts = compactJws.split(".");
     const header = decodeJson(parts[0] ?? "");
-    const payload = decodeJson(parts[1] ?? "");
+    const root = Buffer.from((header.x5c as string[])[2], "base64");
+    const verifier = createVerifier({
+      trustedRoots: [root],
+      policy: {
+        application: "com.example",
+        environment: "Sandbox",
+        claimPaths: { application: ["data", "bundleId"], environment: ["data", "environment"] },
+        signedTimePath: ["signedDate"],
+        requiredExtensions: {
+          leaf: ["1.2.840.113635.100.6.11.1"],
+          intermediate: ["1.2.840.113635.100.6.2.1"],
+        },
+      },
+    });
 
-    expect(parts).toHaveLength(3);
-    expect(header).toMatchObject({ alg: "ES256", typ: "JWT" });
-    expect(header.x5c).toBeInstanceOf(Array);
-    expect(payload).toMatchObject({ data: { environment: "Sandbox" } });
+    await expect(verifier.verify(compactJws)).resolves.toMatchObject({
+      protectedHeader: { alg: "ES256", typ: "JWT" },
+      payload: {
+        signedDate: 1681314324000,
+        data: { bundleId: "com.example", environment: "Sandbox" },
+      },
+    });
   });
 
   it("preserves rejection preconditions for malformed or mismatched notifications", () => {
