@@ -229,4 +229,14 @@ describe("JWS verifier", () => {
       "certificate-chain",
     );
   });
+
+  it("selects a trusted root separately for each historical verification time", () => {
+    const { rootDer, shortLivedRootDer, signJws } = makeSignedFixture();
+    const verifier = createVerifier({ trustedRoots: [shortLivedRootDer, rootDer], policy: {} });
+    const jws = signJws({});
+    verifier.verifySync(jws, { effectiveTime: signedFixtureTime });
+    expect(verifier.verifySync(jws, { effectiveTime: signedFixtureTime + 2_000 }).payload).toEqual(
+      {},
+    );
+  });
 });

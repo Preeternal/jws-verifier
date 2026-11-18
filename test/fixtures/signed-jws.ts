@@ -103,6 +103,7 @@ export const makeSignedFixture = (criticalExtension?: "leaf" | "intermediate") =
   const rootDer = rootCertificate(1, root);
   const rotatedRootDer = rootCertificate(2, rotated);
   const expiredRootDer = rootCertificate(3, root, "210101000000Z");
+  const shortLivedRootDer = rootCertificate(8, root, "250101000001Z");
   const intermediate = certificate({
     serial: 4,
     issuer: rootName,
@@ -200,5 +201,5 @@ export const makeSignedFixture = (criticalExtension?: "leaf" | "intermediate") =
       tlv(0xa0, sequence(oid("2b0601050507300101"), tlv(0x04, basic))),
     );
   };
-  return { rootDer, rotatedRootDer, expiredRootDer, signJws, ocspResponse };
+  return { rootDer, rotatedRootDer, expiredRootDer, shortLivedRootDer, signJws, ocspResponse };
 };

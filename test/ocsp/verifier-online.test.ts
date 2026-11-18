@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createVerifier, VerificationError } from "../../source/index.js";
+import { CertificatePreparation } from "../../source/x509/prepared-certificates.js";
 import { benchmarkPolicy, verificationClockMs } from "../fixtures/benchmark-fixtures.js";
 import { benchmarkVectors } from "../fixtures/benchmark-vectors.js";
 import {
@@ -58,6 +59,131 @@ const expectCode = async (promise: Promise<unknown>, code: VerificationError["co
 };
 
 describe("online OCSP verification", () => {
+  it("reuses the verified chain without skipping a new JWS signature", async () => {
+    const transport = vi.fn(async ({ body }: { body: Uint8Array }) => {
+      const key = Buffer.from(body).toString("base64");
+      if (key === benchmarkVectors.leafRequest) return bytes(benchmarkVectors.leafGood);
+      if (key === benchmarkVectors.intermediateRequest)
+        return bytes(benchmarkVectors.intermediateGood);
+      throw new Error("replay-mismatch");
+    });
+    const verifier = createVerifier({
+      trustedRoots: [bytes(benchmarkPolicy.trustedRootsBase64[0])],
+      clock: () => verificationClockMs,
+      policy: {
+        mode: "online",
+        ocsp: { allowedEndpoints },
+        application: benchmarkPolicy.application,
+        environment: benchmarkPolicy.environment,
+        claimPaths: { application: ["application"], environment: ["environment"] },
+      },
+      ocspTransport: transport,
+    });
+
+    const signatureStart = benchmarkVectors.nextJws.lastIndexOf(".") + 1;
+    const invalid =
+      benchmarkVectors.nextJws.slice(0, signatureStart) +
+      (benchmarkVectors.nextJws[signatureStart] === "A" ? "B" : "A") +
+      benchmarkVectors.nextJws.slice(signatureStart + 1);
+    const prepareChain = vi.spyOn(CertificatePreparation.prototype, "prepareChain");
+    try {
+      await expect(verifier.verify(benchmarkVectors.validJws)).resolves.toBeTruthy();
+      await expect(verifier.verify(benchmarkVectors.nextJws)).resolves.toBeTruthy();
+      await expectCode(verifier.verify(invalid), "invalid-signature");
+      expect(transport).toHaveBeenCalledTimes(2);
+      expect(prepareChain).toHaveBeenCalledTimes(1);
+    } finally {
+      prepareChain.mockRestore();
+    }
+  });
+
+  it("refreshes OCSP after the configured online cache TTL", async () => {
+    let now = verificationClockMs;
+    const transport = vi.fn(async ({ body }: { body: Uint8Array }) => {
+      const key = Buffer.from(body).toString("base64");
+      if (key === benchmarkVectors.leafRequest) return bytes(benchmarkVectors.leafGood);
+      if (key === benchmarkVectors.intermediateRequest)
+        return bytes(benchmarkVectors.intermediateGood);
+      throw new Error("replay-mismatch");
+    });
+    const verifier = createVerifier({
+      trustedRoots: [bytes(benchmarkPolicy.trustedRootsBase64[0])],
+      clock: () => now,
+      limits: { cacheTtlMs: 1_000 },
+      policy: { mode: "online", ocsp: { allowedEndpoints } },
+      ocspTransport: transport,
+    });
+
+    await verifier.verify(benchmarkVectors.validJws);
+    now += 1_001;
+    await verifier.verify(benchmarkVectors.nextJws);
+    expect(transport).toHaveBeenCalledTimes(4);
+  });
+
+  it("evicts old prepared chains when the cache entry limit is reached", async () => {
+    const first = makeSignedFixture();
+    const second = makeSignedFixture();
+    const responses = [
+      first.ocspResponse(signedOcspEndpoints[0], "issuer-name"),
+      first.ocspResponse(signedOcspEndpoints[1], "issuer-name"),
+      second.ocspResponse(signedOcspEndpoints[0], "issuer-name"),
+      second.ocspResponse(signedOcspEndpoints[1], "issuer-name"),
+      first.ocspResponse(signedOcspEndpoints[0], "issuer-name"),
+      first.ocspResponse(signedOcspEndpoints[1], "issuer-name"),
+    ];
+    let responseIndex = 0;
+    const transport = vi.fn(async () => {
+      const response = responses[responseIndex++];
+      if (response === undefined) throw new Error("unexpected OCSP request");
+      return new Uint8Array(response);
+    });
+    const verifier = createVerifier({
+      trustedRoots: [first.rootDer, second.rootDer],
+      clock: () => signedFixtureTime,
+      limits: { maxCacheEntries: 1 },
+      policy: { mode: "online", ocsp: { allowedEndpoints: signedOcspEndpoints } },
+      ocspTransport: transport,
+    });
+
+    await verifier.verify(first.signJws({ sequence: 1 }));
+    await verifier.verify(second.signJws({ sequence: 2 }));
+    await verifier.verify(first.signJws({ sequence: 3 }));
+    expect(transport).toHaveBeenCalledTimes(6);
+  });
+
+  it("rechecks OCSP freshness after the clock moves backward", async () => {
+    const fixture = makeSignedFixture();
+    let now = signedFixtureTime;
+    const transport = vi.fn(async ({ url }: { url: string }) => fixture.ocspResponse(url, "byKey"));
+    const verifier = createVerifier({
+      trustedRoots: [fixture.rootDer],
+      clock: () => now,
+      policy: { mode: "online", ocsp: { allowedEndpoints: signedOcspEndpoints } },
+      ocspTransport: transport,
+    });
+    await verifier.verify(fixture.signJws({}));
+    now -= 61_000;
+    await expectCode(verifier.verify(fixture.signJws({})), "ocsp-stale");
+    expect(transport).toHaveBeenCalledTimes(3);
+  });
+
+  it("reselects a trusted root when the cached anchor expires", async () => {
+    const fixture = makeSignedFixture();
+    let now = signedFixtureTime;
+    const transport = vi.fn(async ({ url }: { url: string }) => fixture.ocspResponse(url, "byKey"));
+    const verifier = createVerifier({
+      trustedRoots: [fixture.shortLivedRootDer, fixture.rootDer],
+      clock: () => now,
+      policy: { mode: "online", ocsp: { allowedEndpoints: signedOcspEndpoints } },
+      ocspTransport: transport,
+    });
+    await verifier.verify(fixture.signJws({}));
+    now += 2_000;
+    await verifier.verify(fixture.signJws({}));
+    await verifier.verify(fixture.signJws({}));
+    expect(transport).toHaveBeenCalledTimes(4);
+  });
+
   it("checks both leaf and intermediate certificates", async () => {
     await expect(onlineVerifier().verify(benchmarkVectors.validJws)).resolves.toMatchObject({
       payload: {

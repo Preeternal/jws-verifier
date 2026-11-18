@@ -26,6 +26,8 @@ const MAX_DEFAULT_PROTECTED_HEADER_BYTES = 16 * 1024;
 const MAX_DEFAULT_PAYLOAD_BYTES = 512 * 1024;
 const MAX_DEFAULT_X5C_ENTRIES = 3;
 const MAX_DEFAULT_CERTIFICATE_BYTES = 1024 * 1024;
+const MAX_DEFAULT_CACHE_ENTRIES = 128;
+const MAX_DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const compactSegmentPattern = /^[A-Za-z0-9_-]+$/;
 const standardBase64Pattern = /^[A-Za-z0-9+/]*={0,2}$/;
@@ -104,6 +106,13 @@ const verifierLimitsSchema = z
     maxPayloadBytes: z.number().int().positive().default(MAX_DEFAULT_PAYLOAD_BYTES),
     maxX5cEntries: z.number().int().min(2).max(MAX_DEFAULT_X5C_ENTRIES).default(3),
     maxCertificateBytes: z.number().int().positive().default(MAX_DEFAULT_CERTIFICATE_BYTES),
+    maxCacheEntries: z.number().int().positive().max(4096).default(MAX_DEFAULT_CACHE_ENTRIES),
+    cacheTtlMs: z
+      .number()
+      .int()
+      .positive()
+      .max(365 * 24 * 60 * 60 * 1000)
+      .default(MAX_DEFAULT_CACHE_TTL_MS),
   })
   .passthrough();
 
@@ -401,6 +410,10 @@ export interface VerifierLimits {
   readonly maxPayloadBytes?: number;
   readonly maxX5cEntries?: number;
   readonly maxCertificateBytes?: number;
+  /** Maximum number of prepared certificate chains retained per verifier instance. */
+  readonly maxCacheEntries?: number;
+  /** Maximum online cache lifetime before OCSP is checked again. */
+  readonly cacheTtlMs?: number;
 }
 
 export interface TrustedRoot {
@@ -445,6 +458,8 @@ interface NormalizedVerifierLimits {
   readonly maxPayloadBytes: number;
   readonly maxX5cEntries: number;
   readonly maxCertificateBytes: number;
+  readonly maxCacheEntries: number;
+  readonly cacheTtlMs: number;
 }
 
 interface ParsedCompactJws {
@@ -454,6 +469,15 @@ interface ParsedCompactJws {
   readonly protectedHeader: Readonly<Record<string, unknown>>;
   readonly payloadBytes: Uint8Array;
   readonly certificates: readonly Uint8Array[];
+  readonly cacheKey: string;
+}
+
+interface CertificateCacheEntry {
+  readonly chain: PreparedChain;
+  readonly root: PreparedCertificate;
+  readonly leafKey: KeyObject;
+  readonly verifiedAtMs: number;
+  readonly expiresAtMs: number;
 }
 
 const freezeHeader = (header: {
@@ -567,17 +591,18 @@ const parseCompactJws = (
     protectedHeader: freezeHeader(header),
     payloadBytes,
     certificates,
+    cacheKey: header.x5c.map((value) => `${value.length}:${value}`).join("|"),
   };
 };
 
-const verifyJwsSignature = (parsed: ParsedCompactJws, leaf: PreparedCertificate): void => {
+const verifyJwsSignature = (parsed: ParsedCompactJws, leafKey: KeyObject): void => {
   const signingInput = Buffer.from(`${parsed.protectedSegment}.${parsed.payloadSegment}`, "ascii");
   try {
     if (
       !verifySignature(
         "sha256",
         signingInput,
-        { key: leaf.certificate.publicKey, dsaEncoding: "ieee-p1363" },
+        { key: leafKey, dsaEncoding: "ieee-p1363" },
         parsed.signature,
       )
     ) {
@@ -732,7 +757,7 @@ const verifyOcspSignature = (
   response: BasicOcspResponse,
   issuer: PreparedCertificate,
   effectiveTime: number,
-): void => {
+): number => {
   if (response.criticalExtensionOids.length > 0) {
     throw new VerificationError(
       "ocsp-policy",
@@ -740,12 +765,16 @@ const verifyOcspSignature = (
     );
   }
   let authorized = responderMatches(response.responderId, issuer);
-  if (authorized && hasValidOcspSignature(response, issuer)) return;
+  if (authorized && hasValidOcspSignature(response, issuer)) {
+    return issuer.metadata.validity.notAfterMs;
+  }
   for (const der of response.certificates) {
     const candidate = authorizedDelegate(der, response.responderId, issuer, effectiveTime);
     if (candidate === undefined) continue;
     authorized = true;
-    if (hasValidOcspSignature(response, candidate)) return;
+    if (hasValidOcspSignature(response, candidate)) {
+      return candidate.metadata.validity.notAfterMs;
+    }
   }
   if (authorized) {
     throw new VerificationError("ocsp-signature", "OCSP response signature is invalid");
@@ -762,7 +791,7 @@ const verifyOcspStatus = (
   issuer: PreparedCertificate,
   effectiveTime: number,
   policy: ReturnType<typeof ocspPolicyFor>,
-): void => {
+): number => {
   if (response.producedAtMs > effectiveTime) {
     throw new VerificationError("ocsp-stale", "OCSP response was produced in the future");
   }
@@ -807,6 +836,7 @@ const verifyOcspStatus = (
   if (result.criticalExtensionOids.length > 0) {
     throw new VerificationError("ocsp-policy", "OCSP SingleResponse contains critical extensions");
   }
+  return result.nextUpdateMs ?? result.thisUpdateMs + policy.maxAgeMs;
 };
 
 export class JwsVerifier {
@@ -816,6 +846,7 @@ export class JwsVerifier {
   private readonly limits: NormalizedVerifierLimits;
   private readonly clock: () => number;
   private readonly ocspTransport: OcspTransport | undefined;
+  private readonly certificateCache = new Map<string, CertificateCacheEntry>();
 
   constructor(options: VerifierOptions) {
     if (options === null || typeof options !== "object") {
@@ -863,8 +894,9 @@ export class JwsVerifier {
       Uint8Array?,
     ];
     const prepared = this.prepareChain(leafDer, intermediateDer);
-    ensurePublicKey(prepared.leaf.certificate.publicKey);
-    verifyJwsSignature(parsed, prepared.leaf);
+    const leafKey = prepared.leaf.certificate.publicKey;
+    ensurePublicKey(leafKey);
+    verifyJwsSignature(parsed, leafKey);
 
     const payload = decodeJson(parsed.payloadBytes, "Payload");
     const effectiveTime = getEffectiveTime(
@@ -898,22 +930,65 @@ export class JwsVerifier {
       Uint8Array,
       Uint8Array?,
     ];
-    const prepared = this.prepareChain(leafDer, intermediateDer);
-    ensurePublicKey(prepared.leaf.certificate.publicKey);
-    verifyJwsSignature(parsed, prepared.leaf);
+    const cached = this.getCacheEntry(parsed.cacheKey);
+    const prepared = cached?.chain ?? this.prepareChain(leafDer, intermediateDer);
+    const leafKey = cached?.leafKey ?? prepared.leaf.certificate.publicKey;
+    ensurePublicKey(leafKey);
+    verifyJwsSignature(parsed, leafKey);
     const payload = decodeJson(parsed.payloadBytes, "Payload");
     const effectiveTime = this.clock();
     if (!isEffectiveTime(effectiveTime)) {
       throw new VerificationError("invalid-effective-time", "clock must return Unix milliseconds");
     }
+    const cachedHit =
+      cached !== undefined &&
+      cached.verifiedAtMs <= effectiveTime &&
+      effectiveTime < cached.expiresAtMs;
+    if (cachedHit) {
+      this.ensureCachedValidity(prepared, cached.root, effectiveTime);
+      validateClaims(payload, this.#policy);
+      return Object.freeze({
+        compactJws,
+        protectedHeader: parsed.protectedHeader,
+        payload: payload as TPayload,
+      });
+    }
+    this.certificateCache.delete(parsed.cacheKey);
     this.verifyChain(prepared, effectiveTime);
     const root = verifyTrustAnchor(prepared, presentedRootDer, effectiveTime);
     validateClaims(payload, this.#policy);
     const ocspPolicy = ocspPolicyFor(this.#policy);
     const leafEndpoint = chooseOcspEndpoint(prepared.leaf, ocspPolicy);
     const intermediateEndpoint = chooseOcspEndpoint(prepared.intermediate, ocspPolicy);
-    await this.verifyOcsp(prepared.leaf, prepared.intermediate, effectiveTime, leafEndpoint);
-    await this.verifyOcsp(prepared.intermediate, root, effectiveTime, intermediateEndpoint);
+    const leafOcspExpiry = await this.verifyOcsp(
+      prepared.leaf,
+      prepared.intermediate,
+      effectiveTime,
+      leafEndpoint,
+    );
+    const intermediateOcspExpiry = await this.verifyOcsp(
+      prepared.intermediate,
+      root,
+      effectiveTime,
+      intermediateEndpoint,
+    );
+    const expiresAtMs = Math.min(
+      effectiveTime + this.limits.cacheTtlMs,
+      prepared.leaf.metadata.validity.notAfterMs,
+      prepared.intermediate.metadata.validity.notAfterMs,
+      root.metadata.validity.notAfterMs,
+      leafOcspExpiry,
+      intermediateOcspExpiry,
+    );
+    if (effectiveTime < expiresAtMs) {
+      this.storeCacheEntry(parsed.cacheKey, {
+        chain: prepared,
+        root,
+        leafKey,
+        verifiedAtMs: effectiveTime,
+        expiresAtMs,
+      });
+    }
     return Object.freeze({
       compactJws,
       protectedHeader: parsed.protectedHeader,
@@ -960,7 +1035,7 @@ export class JwsVerifier {
     issuer: PreparedCertificate,
     effectiveTime: number,
     endpoint: string,
-  ): Promise<void> {
+  ): Promise<number> {
     const policy = ocspPolicyFor(this.#policy);
     const request = buildOcspRequest(certificate, issuer);
     const responseBytes = await this.requestOcsp(endpoint, request);
@@ -982,8 +1057,43 @@ export class JwsVerifier {
     if (!policy.allowedSignatureAlgorithms.includes(response.basic.signatureAlgorithm.oid)) {
       throw new VerificationError("ocsp-policy", "OCSP signature algorithm is not allowed");
     }
-    verifyOcspSignature(response.basic, issuer, effectiveTime);
-    verifyOcspStatus(response.basic, certificate, issuer, effectiveTime, policy);
+    const signerExpiry = verifyOcspSignature(response.basic, issuer, effectiveTime);
+    const freshnessExpiry = verifyOcspStatus(
+      response.basic,
+      certificate,
+      issuer,
+      effectiveTime,
+      policy,
+    );
+    return Math.min(signerExpiry, freshnessExpiry);
+  }
+
+  private ensureCachedValidity(
+    chain: PreparedChain,
+    root: PreparedCertificate,
+    effectiveTime: number,
+  ): void {
+    ensureValidity(chain.leaf, effectiveTime, "Leaf certificate");
+    ensureValidity(chain.intermediate, effectiveTime, "Intermediate certificate");
+    ensureValidity(root, effectiveTime, "Trusted root");
+  }
+
+  private getCacheEntry(key: string): CertificateCacheEntry | undefined {
+    const entry = this.certificateCache.get(key);
+    if (entry === undefined) return undefined;
+    this.certificateCache.delete(key);
+    this.certificateCache.set(key, entry);
+    return entry;
+  }
+
+  private storeCacheEntry(key: string, entry: CertificateCacheEntry): void {
+    this.certificateCache.delete(key);
+    this.certificateCache.set(key, entry);
+    while (this.certificateCache.size > this.limits.maxCacheEntries) {
+      const oldest = this.certificateCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.certificateCache.delete(oldest);
+    }
   }
 
   private prepareChain(leafDer: Uint8Array, intermediateDer: Uint8Array): PreparedChain {
