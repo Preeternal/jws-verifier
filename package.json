@@ -1,0 +1,69 @@
+{
+  "name": "jws-verifier",
+  "version": "0.1.0",
+  "description": "TypeScript library for secure JWS verification, X.509 certificate chain validation, and OCSP revocation checking",
+  "homepage": "https://github.com/Preeternal/jws-verifier#readme",
+  "bugs": {
+    "url": "https://github.com/Preeternal/jws-verifier/issues"
+  },
+  "license": "MIT",
+  "author": "Preeternal <preeternal@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Preeternal/jws-verifier.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "yarn run lint && yarn run typecheck && yarn run deps:lint && yarn run security:lint && yarn run test:coverage",
+    "deps:lint": "depcruise --config .dependency-cruiser.cjs source test",
+    "dev": "tsc --watch",
+    "format": "oxfmt . --write",
+    "lint": "biome check --error-on-warnings . && oxlint --deny-warnings . && oxfmt --check .",
+    "attw": "attw --pack . --profile esm-only",
+    "prepare": "lefthook install",
+    "prepublishOnly": "yarn run check && yarn run build && yarn run verify:artifacts && yarn run publint && yarn run types:lint",
+    "publint": "publint --pack yarn",
+    "release:check": "yarn run prepublishOnly && yarn run verify:package",
+    "security:lint": "node scripts/security-lint.mjs",
+    "size:report": "npm pack --dry-run --json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "types:lint": "attw --pack . --profile esm-only",
+    "verify:artifacts": "node -e \"for (const file of ['dist/index.js','dist/index.d.ts']) require('node:fs').statSync(file)\"",
+    "verify:package": "npm publish --dry-run --ignore-scripts"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.3",
+    "@biomejs/biome": "^2.4.16",
+    "@sindresorhus/tsconfig": "^8.1.0",
+    "@types/node": "^22",
+    "@vitest/coverage-v8": "^4.1.8",
+    "dependency-cruiser": "^17.4.3",
+    "lefthook": "^2.1.9",
+    "oxfmt": "^0.53.0",
+    "oxlint": "^1.68.0",
+    "publint": "^0.3.21",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@types/node": "^22"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

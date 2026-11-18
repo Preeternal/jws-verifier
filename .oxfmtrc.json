@@ -1,0 +1,3 @@
+{
+  "ignorePatterns": ["*.json", "**/*.json", "*.jsonc", "**/*.jsonc", "*.yml", "**/*.yml"]
+}
