@@ -1,5 +1,5 @@
 {
-  "name": "jws-verifier",
+  "name": "@preeternal/jws-verifier",
   "version": "0.1.0",
   "packageManager": "yarn@4.18.1",
   "description": "TypeScript library for secure JWS verification, X.509 certificate chain validation, and OCSP revocation checking",
@@ -16,6 +16,10 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "exports": {
     ".": {

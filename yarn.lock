@@ -603,6 +603,27 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@preeternal/jws-verifier@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "@preeternal/jws-verifier@workspace:."
+  dependencies:
+    "@arethetypeswrong/cli": "npm:^0.18.3"
+    "@biomejs/biome": "npm:^2.4.16"
+    "@sindresorhus/tsconfig": "npm:^8.1.0"
+    "@types/node": "npm:^22"
+    "@vitest/coverage-v8": "npm:^4.1.8"
+    "@yarnpkg/sdks": "npm:^3.3.1"
+    dependency-cruiser: "npm:^17.4.3"
+    lefthook: "npm:^2.1.9"
+    oxfmt: "npm:^0.53.0"
+    oxlint: "npm:^1.68.0"
+    publint: "npm:^0.3.21"
+    typescript: "npm:^6.0.3"
+    vitest: "npm:^4.1.8"
+    zod: "npm:^4.4.3"
+  languageName: unknown
+  linkType: soft
+
 "@publint/pack@npm:^0.1.7":
   version: 0.1.7
   resolution: "@publint/pack@npm:0.1.7"
@@ -1960,27 +1981,6 @@ __metadata:
   checksum: 10c0/5a04eed94810fa55c5ea138b2f7a5c12b97c3750bc63d11e511dcecbfef758003861522a070c2272764ee0f4e3e323862f386945aeb5b85b87ee43f084ba586c
   languageName: node
   linkType: hard
-
-"jws-verifier@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "jws-verifier@workspace:."
-  dependencies:
-    "@arethetypeswrong/cli": "npm:^0.18.3"
-    "@biomejs/biome": "npm:^2.4.16"
-    "@sindresorhus/tsconfig": "npm:^8.1.0"
-    "@types/node": "npm:^22"
-    "@vitest/coverage-v8": "npm:^4.1.8"
-    "@yarnpkg/sdks": "npm:^3.3.1"
-    dependency-cruiser: "npm:^17.4.3"
-    lefthook: "npm:^2.1.9"
-    oxfmt: "npm:^0.53.0"
-    oxlint: "npm:^1.68.0"
-    publint: "npm:^0.3.21"
-    typescript: "npm:^6.0.3"
-    vitest: "npm:^4.1.8"
-    zod: "npm:^4.4.3"
-  languageName: unknown
-  linkType: soft
 
 "keyv@npm:^4.0.0":
   version: 4.5.4

@@ -1,6 +1,6 @@
-# `jws-verifier`
+# `@preeternal/jws-verifier`
 
-[![npm version](https://img.shields.io/npm/v/jws-verifier.svg)](https://www.npmjs.com/package/jws-verifier)
+[![npm version](https://img.shields.io/npm/v/@preeternal/jws-verifier.svg)](https://www.npmjs.com/package/@preeternal/jws-verifier)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 TypeScript library for secure JWS verification, X.509 certificate chain validation, and OCSP revocation checking
@@ -8,13 +8,13 @@ TypeScript library for secure JWS verification, X.509 certificate chain validati
 ## Install
 
 ```bash
-yarn add jws-verifier
+yarn add @preeternal/jws-verifier
 ```
 
 ## Usage
 
 ```ts
-import { createVerifier } from "jws-verifier";
+import { createVerifier } from "@preeternal/jws-verifier";
 
 const verifier = createVerifier({
   trustedRoots: [rootDer], // DER certificate bytes supplied by the host
