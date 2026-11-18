@@ -1,4 +1,4 @@
-import { benchmarkVectors } from "./benchmark-vectors.js";
+import { benchmarkVectors } from "./benchmark-vectors.ts";
 
 export const verificationClockMs = Date.parse("2026-11-18T18:26:00Z");
 const staleClockMs = Date.parse("2026-11-20T18:26:00Z");
@@ -118,5 +118,17 @@ export const benchmarkFixtures = [
     cacheState: "warm-hit",
     primeWithJws: benchmarkVectors.validJws,
     expectedRequests: 0,
+  },
+  {
+    ...online,
+    id: "jws.synthetic.valid-expired-cache",
+    kind: "jws",
+    jws: benchmarkVectors.nextJws,
+    clockMs: verificationClockMs + 60 * 60 * 1000,
+    primeWithJws: benchmarkVectors.validJws,
+    primeClockMs: verificationClockMs,
+    expectation: "accept",
+    cacheState: "warm-expired",
+    expectedRequests: 2,
   },
 ] as const;

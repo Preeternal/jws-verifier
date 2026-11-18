@@ -24,7 +24,7 @@ describe("public benchmark fixture catalog", () => {
   it("covers JWS, OCSP, cache states, and all outcomes", () => {
     expect(new Set(benchmarkFixtures.map(({ kind }) => kind))).toEqual(new Set(["jws", "ocsp"]));
     expect(new Set(benchmarkFixtures.map(({ cacheState }) => cacheState))).toEqual(
-      new Set(["cold", "warm-hit", "warm-miss"]),
+      new Set(["cold", "warm-hit", "warm-miss", "warm-expired"]),
     );
     expect(new Set(benchmarkFixtures.map(({ expectation }) => expectation))).toEqual(
       new Set(["accept", "reject", "transport-error"]),

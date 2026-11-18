@@ -31,6 +31,7 @@
     "format": "oxfmt . --write",
     "lint": "biome check --error-on-warnings . && oxlint --deny-warnings . && oxfmt --check .",
     "attw": "attw --pack . --profile esm-only",
+    "benchmark": "node --experimental-strip-types --disable-warning=ExperimentalWarning benchmark/runner.mjs",
     "prepare": "lefthook install",
     "prepublishOnly": "yarn run check && yarn run build && yarn run verify:artifacts && yarn run publint && yarn run types:lint",
     "publint": "publint --pack yarn",
