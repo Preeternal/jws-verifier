@@ -28,5 +28,17 @@ export {
   parseOcspResponse,
 } from "./ocsp/codec.js";
 export { fetchOcspResponse } from "./ocsp/transport.js";
+export {
+  type AppReceiptInput,
+  extractTransactionIdFromAppReceipt,
+  extractTransactionIdFromTransactionReceipt,
+  parseAppReceiptTransactionId,
+  parseTransactionReceiptTransactionId,
+  type ReceiptErrorCode,
+  type ReceiptExtractionOutcome,
+  type ReceiptExtractionResult,
+  ReceiptFormatError,
+  ReceiptUtility,
+} from "./receipt/utility.js";
 export type { BrandedId } from "./types/index.js";
 export { formatValue } from "./utils/formatting.js";

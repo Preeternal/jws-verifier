@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { createVerifier } from "../../source/index.js";
+import { createVerifier, parseAppReceiptTransactionId } from "../../source/index.js";
 import { parseX509CertificateMetadata } from "../../source/x509/certificate-metadata.js";
 
 const fixture = (name: string): string =>
@@ -64,15 +64,12 @@ describe("Apple compatibility fixture smoke test", () => {
     expect(wrongBundle).toMatchObject({ data: { bundleId: "com.example.wrong" } });
   });
 
-  it("loads both Xcode receipt snapshots as indefinite-length BER sequences", () => {
-    for (const name of [
-      "xcode-app-receipt-empty.base64",
-      "xcode-app-receipt-with-transaction.base64",
-    ]) {
-      const bytes = Buffer.from(fixture(name), "base64");
-
-      expect([...bytes.subarray(0, 2)]).toEqual([0x30, 0x80]);
-      expect(bytes.length).toBeGreaterThan(256);
-    }
+  it("extracts the expected outcomes from the Xcode BER receipt snapshots", () => {
+    expect(parseAppReceiptTransactionId(fixture("xcode-app-receipt-empty.base64"))).toEqual({
+      kind: "missing",
+    });
+    expect(
+      parseAppReceiptTransactionId(fixture("xcode-app-receipt-with-transaction.base64")),
+    ).toEqual({ kind: "found", transactionId: "0" });
   });
 });
