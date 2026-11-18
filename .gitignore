@@ -10,9 +10,10 @@ coverage
 .env.*
 !.env.example
 .vscode
+.yarn/sdks/
 .idea
 package-lock.json
-yarn.lock
+/.yarn/install-state.gz
 report/
 reviews_triage/
 triage_decisions.db

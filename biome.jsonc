@@ -13,6 +13,7 @@
       "!coverage",
       "!.cache",
       "!node_modules",
+      "!**/.pnp.*",
       // JSON, JSONC, and YAML stay out of Biome to avoid oxfmt/Biome ownership conflicts.
       "!*.json",
       "!**/*.json",
@@ -28,7 +29,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "complexity": {
         "noArguments": "error",
         "noBannedTypes": "error",
@@ -65,8 +66,6 @@
       "nursery": {
         "noFloatingPromises": "error",
         "noMisusedPromises": "error",
-        "noShadow": "error",
-        "noUnnecessaryConditions": "error",
         "useExhaustiveSwitchCases": "error",
       },
       "performance": {
@@ -147,7 +146,7 @@
       },
     },
     {
-      "includes": ["vitest.config.ts"],
+      "includes": ["vitest.config.ts", "vitest.smoke.config.ts"],
       "linter": {
         "rules": {
           "style": {

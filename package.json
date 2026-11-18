@@ -1,6 +1,7 @@
 {
   "name": "jws-verifier",
   "version": "0.1.0",
+  "packageManager": "yarn@4.18.1",
   "description": "TypeScript library for secure JWS verification, X.509 certificate chain validation, and OCSP revocation checking",
   "homepage": "https://github.com/Preeternal/jws-verifier#readme",
   "bugs": {
@@ -35,9 +36,11 @@
     "publint": "publint --pack yarn",
     "release:check": "yarn run prepublishOnly && yarn run verify:package",
     "security:lint": "node scripts/security-lint.mjs",
+    "setup:editor": "yarn sdks vscode",
     "size:report": "npm pack --dry-run --json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:smoke:apple": "vitest run --config vitest.smoke.config.ts",
     "typecheck": "tsc --noEmit",
     "types:lint": "attw --pack . --profile esm-only",
     "verify:artifacts": "node -e \"for (const file of ['dist/index.js','dist/index.d.ts']) require('node:fs').statSync(file)\"",
@@ -52,6 +55,7 @@
     "@sindresorhus/tsconfig": "^8.1.0",
     "@types/node": "^22",
     "@vitest/coverage-v8": "^4.1.8",
+    "@yarnpkg/sdks": "^3.3.1",
     "dependency-cruiser": "^17.4.3",
     "lefthook": "^2.1.9",
     "oxfmt": "^0.53.0",
@@ -61,7 +65,8 @@
     "vitest": "^4.1.8"
   },
   "resolutions": {
-    "@types/node": "^22"
+    "@types/node": "^22",
+    "@yarnpkg/core": "4.9.1"
   },
   "engines": {
     "node": ">=22"

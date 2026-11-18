@@ -27,6 +27,7 @@ wired into a single command:
 ```bash
 yarn run check         # lint + dep/security checks + typecheck + coverage
 yarn run test          # run tests
+yarn run setup:editor  # generate local Yarn PnP SDKs for VS Code
 yarn run build         # build to dist/
 yarn run release:check # package validation + publish dry run
 ```
