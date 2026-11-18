@@ -62,6 +62,19 @@ For legacy App Receipts, `extractTransactionIdFromAppReceipt` reads the ID
 synchronously. The extracted value alone does not establish receipt
 authenticity or purchase entitlement.
 
+## Performance
+
+CPU time per verification (median / p95) on Linux GitHub Actions at `8fe678a`.
+The benchmark uses synthetic ES256 JWS and OCSP responses replayed from memory.
+
+| Scenario                       | Node 22 · Xeon | Node 24 · EPYC |
+| ------------------------------ | -------------: | -------------: |
+| First verification after setup | 7.11 / 7.48 ms | 5.46 / 7.89 ms |
+| Warm cache miss                | 1.24 / 3.94 ms | 0.68 / 1.31 ms |
+| Warm cache hit                 | 0.14 / 0.49 ms | 0.08 / 0.48 ms |
+
+Run locally with `yarn benchmark:ci`. [Node 22 CI report](https://github.com/Preeternal/jws-verifier/actions/runs/44414540308/attempts/1#summary-135191235409) · [Node 24 CI report](https://github.com/Preeternal/jws-verifier/actions/runs/44414540308/attempts/1#summary-135191235313)
+
 ## Contributing
 
 Development setup, checks, benchmarks, Worker startup, and pull-request
