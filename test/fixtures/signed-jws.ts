@@ -1,4 +1,4 @@
-import { generateKeyPairSync, type KeyObject, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, type KeyObject, sign } from "node:crypto";
 
 const tlv = (tag: number, ...values: Buffer[]): Buffer => {
   const value = Buffer.concat(values);
@@ -64,6 +64,25 @@ const certificate = (fields: CertificateFields): Buffer => {
 
 export const signedFixtureTime = Date.UTC(2025, 0, 1);
 export const fixtureMarkerOid = "1.2.3.4";
+export const signedOcspEndpoints = [
+  "https://leaf.ocsp.example.test/",
+  "https://intermediate.ocsp.example.test/",
+] as const;
+
+const aia = (url: string): Buffer =>
+  extension(
+    "2b06010505070101",
+    sequence(sequence(oid("2b06010505073001"), tlv(0x86, Buffer.from(url)))),
+    false,
+  );
+
+const keyHash = (algorithm: "sha1" | "sha256", key: KeyObject): Buffer => {
+  const spki = key.export({ type: "spki", format: "der" });
+  // The synthetic P-256 keys end with the 65-byte uncompressed point.
+  return createHash(algorithm).update(spki.subarray(-65)).digest();
+};
+
+const responseTime = (value: string) => tlv(0x18, Buffer.from(value));
 
 /** Generates independent synthetic keys in memory with fixed certificate dates. */
 export const makeSignedFixture = (criticalExtension?: "leaf" | "intermediate") => {
@@ -91,10 +110,12 @@ export const makeSignedFixture = (criticalExtension?: "leaf" | "intermediate") =
     issuerKey: root.privateKey,
     subjectKey: issuer.publicKey,
     ca: true,
-    extraExtensions:
-      criticalExtension === "intermediate"
+    extraExtensions: [
+      aia(signedOcspEndpoints[1]),
+      ...(criticalExtension === "intermediate"
         ? [extension("551d25", sequence(oid("2b06010505070309")), true)]
-        : [],
+        : []),
+    ],
   });
   const leaf = certificate({
     serial: 5,
@@ -103,7 +124,10 @@ export const makeSignedFixture = (criticalExtension?: "leaf" | "intermediate") =
     issuerKey: issuer.privateKey,
     subjectKey: signer.publicKey,
     ca: false,
-    extraExtensions: [extension("2a0304", sequence(), criticalExtension === "leaf")],
+    extraExtensions: [
+      aia(signedOcspEndpoints[0]),
+      extension("2a0304", sequence(), criticalExtension === "leaf"),
+    ],
   });
   const signJws = (
     payload: unknown,
@@ -120,5 +144,61 @@ export const makeSignedFixture = (criticalExtension?: "leaf" | "intermediate") =
     });
     return `${input}.${signature.toString("base64url")}`;
   };
-  return { rootDer, rotatedRootDer, expiredRootDer, signJws };
+  const ocspResponse = (
+    url: string,
+    scenario: "byKey" | "issuer-name" | "delegate-name" | "unauthorized",
+  ): Buffer => {
+    const forLeaf = url === signedOcspEndpoints[0];
+    if (!forLeaf && url !== signedOcspEndpoints[1]) throw new Error("Unexpected replay URL");
+    const ca = forLeaf ? issuer : root;
+    const caName = forLeaf ? intermediateName : rootName;
+    const responderName = scenario === "issuer-name" ? caName : name("Fixture OCSP Delegate");
+    const signingDelegate = forLeaf && scenario !== "byKey";
+    const responseSigner = signingDelegate ? publicKeyPair() : ca;
+    const delegatedCertificate = (key: KeyObject, serial: number, authorized: boolean) =>
+      certificate({
+        serial,
+        issuer: caName,
+        subject: responderName,
+        issuerKey: ca.privateKey,
+        subjectKey: key,
+        ca: false,
+        extraExtensions: authorized
+          ? [extension("551d25", sequence(oid("2b06010505070309")), true)]
+          : [],
+      });
+    const embedded = signingDelegate
+      ? [
+          delegatedCertificate(publicKeyPair().publicKey, 6, scenario !== "unauthorized"),
+          delegatedCertificate(responseSigner.publicKey, 7, scenario !== "unauthorized"),
+        ]
+      : [];
+    const responder =
+      scenario === "byKey"
+        ? tlv(0xa2, tlv(0x04, keyHash("sha1", responseSigner.publicKey)))
+        : tlv(0xa1, signingDelegate ? responderName : caName);
+    const certId = sequence(
+      sequence(oid("608648016503040201"), tlv(0x05)),
+      tlv(0x04, createHash("sha256").update(caName).digest()),
+      tlv(0x04, keyHash("sha256", ca.publicKey)),
+      integer(forLeaf ? 5 : 4),
+    );
+    const thisUpdate = responseTime("20241231235900Z");
+    const data = sequence(
+      responder,
+      thisUpdate,
+      sequence(sequence(certId, tlv(0x80), thisUpdate, tlv(0xa0, responseTime("20250102000000Z")))),
+    );
+    const basic = sequence(
+      data,
+      signingAlgorithm,
+      bitString(sign("sha256", data, responseSigner.privateKey)),
+      ...(embedded.length ? [tlv(0xa0, sequence(...embedded))] : []),
+    );
+    return sequence(
+      tlv(0x0a, Buffer.from([0])),
+      tlv(0xa0, sequence(oid("2b0601050507300101"), tlv(0x04, basic))),
+    );
+  };
+  return { rootDer, rotatedRootDer, expiredRootDer, signJws, ocspResponse };
 };

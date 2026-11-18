@@ -3,10 +3,22 @@ import { type KeyObject, verify as verifySignature } from "node:crypto";
 
 import { z } from "zod";
 
+import { DerReader } from "../asn1/der-reader.js";
+import {
+  buildOcspRequest,
+  type OcspResponderId,
+  ocspBytesEqual,
+  ocspCertIdFor,
+  ocspKeyHash,
+  ocspNameValue,
+  parseOcspResponse,
+} from "../ocsp/codec.js";
+import { fetchOcspResponse } from "../ocsp/transport.js";
 import {
   CertificatePreparation,
   type PreparedCertificate,
   type PreparedChain,
+  prepareCertificate,
 } from "../x509/prepared-certificates.js";
 
 const MAX_DEFAULT_COMPACT_JWS_BYTES = 1024 * 1024;
@@ -23,6 +35,32 @@ const textDecoder = new TextDecoder("utf-8", { fatal: true });
 const claimPathSchema = z.array(z.string().min(1)).min(1);
 const oidSchema = z.string().regex(/^[012](\.(0|[1-9][0-9]*)){1,63}$/u);
 const protectedHeaderSchema = z.looseObject({ alg: z.string(), x5c: z.array(z.string()) });
+const ocspPolicySchema = z.strictObject({
+  allowedEndpoints: z.array(z.string().min(1)).optional(),
+  timeoutMs: z.number().int().positive().max(60_000).default(5_000),
+  maxResponseBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(16 * 1024 * 1024)
+    .default(256 * 1024),
+  allowMissingNextUpdate: z.boolean().default(false),
+  maxAgeMs: z
+    .number()
+    .int()
+    .positive()
+    .default(15 * 60 * 1000),
+  allowedSignatureAlgorithms: z
+    .array(z.string().min(1))
+    .default([
+      "1.2.840.10045.4.3.2",
+      "1.2.840.10045.4.3.3",
+      "1.2.840.10045.4.3.4",
+      "1.2.840.113549.1.1.11",
+      "1.2.840.113549.1.1.12",
+      "1.2.840.113549.1.1.13",
+    ]),
+});
 
 const verifierPolicySchema = z
   .strictObject({
@@ -43,6 +81,7 @@ const verifierPolicySchema = z
         intermediate: z.array(oidSchema).optional(),
       })
       .optional(),
+    ocsp: ocspPolicySchema.optional(),
     validateClaims: z
       .custom<NonNullable<VerifierPolicy["validateClaims"]>>((value) => typeof value === "function")
       .optional(),
@@ -124,6 +163,21 @@ export interface OcspTransportRequest {
 }
 
 export type OcspTransport = (request: OcspTransportRequest) => Promise<Uint8Array>;
+
+const defaultOcspPolicy = {
+  timeoutMs: 5_000,
+  maxResponseBytes: 256 * 1024,
+  allowMissingNextUpdate: false,
+  maxAgeMs: 15 * 60 * 1000,
+  allowedSignatureAlgorithms: [
+    "1.2.840.10045.4.3.2",
+    "1.2.840.10045.4.3.3",
+    "1.2.840.10045.4.3.4",
+    "1.2.840.113549.1.1.11",
+    "1.2.840.113549.1.1.12",
+    "1.2.840.113549.1.1.13",
+  ],
+} as const;
 
 const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
   if (left.length !== right.length) return false;
@@ -251,7 +305,7 @@ const verifyTrustAnchor = (
   chain: PreparedChain,
   presentedRootDer: Uint8Array | undefined,
   effectiveTime: number,
-): void => {
+): PreparedCertificate => {
   const { intermediate, roots } = chain;
   let failure: VerificationError | undefined;
   for (const root of roots) {
@@ -260,7 +314,7 @@ const verifyTrustAnchor = (
     try {
       verifyCertificateSignature(intermediate, root, "Intermediate certificate");
       ensureValidity(root, effectiveTime, "Trusted root");
-      return;
+      return root;
     } catch (error) {
       if (!(error instanceof VerificationError)) throw error;
       if (failure === undefined || error.code === "certificate-policy") failure = error;
@@ -290,7 +344,15 @@ export type VerificationErrorCode =
   | "claim-policy"
   | "invalid-effective-time"
   | "online-unavailable"
-  | "invalid-trust-anchor";
+  | "invalid-trust-anchor"
+  | "ocsp-format"
+  | "ocsp-policy"
+  | "ocsp-status"
+  | "ocsp-signature"
+  | "ocsp-revoked"
+  | "ocsp-unknown"
+  | "ocsp-stale"
+  | "transport-error";
 
 export class VerificationError extends Error {
   readonly code: VerificationErrorCode;
@@ -300,6 +362,17 @@ export class VerificationError extends Error {
     this.name = "VerificationError";
     this.code = code;
   }
+}
+
+export interface OcspPolicy {
+  /** Exact OCSP URLs allowed by the host. An omitted list permits no endpoints. */
+  readonly allowedEndpoints?: readonly string[];
+  readonly timeoutMs?: number;
+  readonly maxResponseBytes?: number;
+  readonly allowMissingNextUpdate?: boolean;
+  readonly maxAgeMs?: number;
+  /** Signature algorithm OIDs accepted for BasicOCSPResponse. */
+  readonly allowedSignatureAlgorithms?: readonly string[];
 }
 
 export interface VerifierPolicy {
@@ -318,6 +391,7 @@ export interface VerifierPolicy {
     readonly leaf?: readonly string[];
     readonly intermediate?: readonly string[];
   };
+  readonly ocsp?: OcspPolicy;
   readonly validateClaims?: (payload: unknown) => boolean;
 }
 
@@ -355,6 +429,15 @@ export interface VerifiedJws<TPayload = unknown> {
 }
 
 type NormalizedVerifierPolicy = z.output<typeof verifierPolicySchema>;
+
+interface NormalizedOcspPolicy {
+  readonly allowedEndpoints?: readonly string[];
+  readonly timeoutMs: number;
+  readonly maxResponseBytes: number;
+  readonly allowMissingNextUpdate: boolean;
+  readonly maxAgeMs: number;
+  readonly allowedSignatureAlgorithms: readonly string[];
+}
 
 interface NormalizedVerifierLimits {
   readonly maxCompactJwsBytes: number;
@@ -506,11 +589,233 @@ const verifyJwsSignature = (parsed: ParsedCompactJws, leaf: PreparedCertificate)
   }
 };
 
+const ocspPolicyFor = (policy: NormalizedVerifierPolicy): NormalizedOcspPolicy =>
+  policy.ocsp === undefined
+    ? defaultOcspPolicy
+    : {
+        ...defaultOcspPolicy,
+        ...policy.ocsp,
+        allowedSignatureAlgorithms:
+          policy.ocsp.allowedSignatureAlgorithms ?? defaultOcspPolicy.allowedSignatureAlgorithms,
+      };
+
+const normalizedHttpUrl = (value: string): string => {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch (error) {
+    throw new VerificationError("ocsp-policy", "OCSP endpoint is not a valid URL", error);
+  }
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.username ||
+    url.password ||
+    url.hash
+  ) {
+    throw new VerificationError(
+      "ocsp-policy",
+      "OCSP endpoint must be an HTTP(S) URL without credentials",
+    );
+  }
+  return url.href;
+};
+
+const chooseOcspEndpoint = (
+  certificate: PreparedCertificate,
+  policy: ReturnType<typeof ocspPolicyFor>,
+): string => {
+  const allowed = (policy.allowedEndpoints ?? []).map(normalizedHttpUrl);
+  const candidates =
+    certificate.metadata.authorityInfoAccess?.ocspUrls.map(({ value }) => value) ?? [];
+  for (const candidate of candidates) {
+    const normalized = normalizedHttpUrl(candidate);
+    if (allowed.includes(normalized)) return normalized;
+  }
+  throw new VerificationError("ocsp-policy", "No certificate OCSP endpoint is allowed by policy");
+};
+
+const subjectValue = (certificate: PreparedCertificate): Uint8Array => {
+  const reader = new DerReader(
+    certificate.der,
+    {},
+    certificate.metadata.subject.offset,
+    certificate.metadata.subject.offset + certificate.metadata.subject.length,
+  );
+  const element = reader.readElement();
+  reader.assertEnd();
+  return element.value;
+};
+
+const responderMatches = (
+  responder: OcspResponderId,
+  certificate: PreparedCertificate,
+): boolean => {
+  if (responder.kind === "key") return ocspBytesEqual(responder.value, ocspKeyHash(certificate));
+  const expected = responder.implicit ? subjectValue(certificate) : ocspNameValue(certificate);
+  return ocspBytesEqual(responder.value, expected);
+};
+
+const verifyResponderCertificate = (
+  signer: PreparedCertificate,
+  issuer: PreparedCertificate,
+  effectiveTime: number,
+): void => {
+  if (!issuerMatches(signer, issuer)) {
+    throw new VerificationError("ocsp-policy", "OCSP delegated responder has the wrong issuer");
+  }
+  verifyCertificateSignature(signer, issuer, "OCSP delegated responder");
+  ensureValidity(signer, effectiveTime, "OCSP delegated responder");
+  if (signer.metadata.basicConstraints?.ca === true) {
+    throw new VerificationError("ocsp-policy", "OCSP delegated responder must not be a CA");
+  }
+  if (!signer.metadata.extendedKeyUsage?.ocspSigning) {
+    throw new VerificationError("ocsp-policy", "OCSP delegated responder lacks OCSPSigning");
+  }
+  if (
+    signer.metadata.keyUsage !== undefined &&
+    !signer.metadata.keyUsage.names.includes("digitalSignature")
+  ) {
+    throw new VerificationError("ocsp-policy", "OCSP delegated responder lacks digitalSignature");
+  }
+  for (const extension of signer.metadata.extensions) {
+    if (
+      extension.critical &&
+      extension.parsed?.kind !== "basicConstraints" &&
+      extension.parsed?.kind !== "keyUsage" &&
+      extension.parsed?.kind !== "extendedKeyUsage"
+    ) {
+      throw new VerificationError(
+        "ocsp-policy",
+        `OCSP delegated responder has unsupported critical extension ${extension.oid}`,
+      );
+    }
+  }
+};
+
+const authorizedDelegate = (
+  der: Uint8Array,
+  responder: OcspResponderId,
+  issuer: PreparedCertificate,
+  effectiveTime: number,
+): PreparedCertificate | undefined => {
+  try {
+    const candidate = prepareCertificate(der);
+    if (!responderMatches(responder, candidate)) return undefined;
+    verifyResponderCertificate(candidate, issuer, effectiveTime);
+    return candidate;
+  } catch {
+    return undefined;
+  }
+};
+
+type BasicOcspResponse = NonNullable<ReturnType<typeof parseOcspResponse>["basic"]>;
+
+const hasValidOcspSignature = (
+  response: BasicOcspResponse,
+  signer: PreparedCertificate,
+): boolean => {
+  try {
+    const key = signer.certificate.publicKey;
+    if (key.asymmetricKeyType !== response.signatureAlgorithm.key) return false;
+    return verifySignature(
+      response.signatureAlgorithm.hash,
+      response.tbsResponseData,
+      key,
+      response.signature,
+    );
+  } catch {
+    return false;
+  }
+};
+
+const verifyOcspSignature = (
+  response: BasicOcspResponse,
+  issuer: PreparedCertificate,
+  effectiveTime: number,
+): void => {
+  if (response.criticalExtensionOids.length > 0) {
+    throw new VerificationError(
+      "ocsp-policy",
+      "OCSP response contains unsupported critical extensions",
+    );
+  }
+  let authorized = responderMatches(response.responderId, issuer);
+  if (authorized && hasValidOcspSignature(response, issuer)) return;
+  for (const der of response.certificates) {
+    const candidate = authorizedDelegate(der, response.responderId, issuer, effectiveTime);
+    if (candidate === undefined) continue;
+    authorized = true;
+    if (hasValidOcspSignature(response, candidate)) return;
+  }
+  if (authorized) {
+    throw new VerificationError("ocsp-signature", "OCSP response signature is invalid");
+  }
+  throw new VerificationError(
+    "ocsp-policy",
+    "OCSP responder is not the issuer or an authorized delegate",
+  );
+};
+
+const verifyOcspStatus = (
+  response: NonNullable<ReturnType<typeof parseOcspResponse>["basic"]>,
+  certificate: PreparedCertificate,
+  issuer: PreparedCertificate,
+  effectiveTime: number,
+  policy: ReturnType<typeof ocspPolicyFor>,
+): void => {
+  if (response.producedAtMs > effectiveTime) {
+    throw new VerificationError("ocsp-stale", "OCSP response was produced in the future");
+  }
+  const expected = ocspCertIdFor(certificate, issuer);
+  const matching = response.responses.filter(
+    ({ certId }) =>
+      certId.hashAlgorithm === expected.hashAlgorithm &&
+      ocspBytesEqual(certId.issuerNameHash, expected.issuerNameHash) &&
+      ocspBytesEqual(certId.issuerKeyHash, expected.issuerKeyHash) &&
+      ocspBytesEqual(certId.serialNumber, expected.serialNumber),
+  );
+  if (matching.length === 0)
+    throw new VerificationError("ocsp-policy", "OCSP response CertID does not match the request");
+  if (matching.length !== 1)
+    throw new VerificationError(
+      "ocsp-policy",
+      "OCSP response contains duplicate matching CertID entries",
+    );
+  const result = matching[0];
+  if (result === undefined)
+    throw new VerificationError(
+      "ocsp-policy",
+      "OCSP response is missing its matching SingleResponse",
+    );
+  if (result.status === "revoked")
+    throw new VerificationError("ocsp-revoked", "Certificate is revoked according to OCSP");
+  if (result.status === "unknown")
+    throw new VerificationError("ocsp-unknown", "OCSP responder returned unknown status");
+  if (
+    result.thisUpdateMs > effectiveTime ||
+    (result.nextUpdateMs !== undefined && result.nextUpdateMs < result.thisUpdateMs)
+  ) {
+    throw new VerificationError("ocsp-stale", "OCSP response has invalid update times");
+  }
+  if (result.nextUpdateMs === undefined) {
+    if (!policy.allowMissingNextUpdate || effectiveTime - result.thisUpdateMs > policy.maxAgeMs) {
+      throw new VerificationError("ocsp-stale", "OCSP response has no acceptable nextUpdate");
+    }
+  } else if (effectiveTime > result.nextUpdateMs) {
+    throw new VerificationError("ocsp-stale", "OCSP response is expired");
+  }
+  if (result.criticalExtensionOids.length > 0) {
+    throw new VerificationError("ocsp-policy", "OCSP SingleResponse contains critical extensions");
+  }
+};
+
 export class JwsVerifier {
   readonly #policy: NormalizedVerifierPolicy;
 
   private readonly preparation: CertificatePreparation;
   private readonly limits: NormalizedVerifierLimits;
+  private readonly clock: () => number;
+  private readonly ocspTransport: OcspTransport | undefined;
 
   constructor(options: VerifierOptions) {
     if (options === null || typeof options !== "object") {
@@ -519,12 +824,19 @@ export class JwsVerifier {
     this.#policy = normalizePolicy(options.policy);
     this.limits = normalizeLimits(options.limits);
     this.preparation = prepareRoots(normalizeRoots(options.trustedRoots));
+    this.clock = options.clock ?? (() => Date.now());
+    if (typeof this.clock !== "function") throw new TypeError("clock must be a function");
+    if (options.ocspTransport !== undefined && typeof options.ocspTransport !== "function") {
+      throw new TypeError("ocspTransport must be a function");
+    }
+    this.ocspTransport = options.ocspTransport;
   }
 
   async verify<TPayload = unknown>(
     compactJws: string,
     options: VerifyOptions = {},
   ): Promise<VerifiedJws<TPayload>> {
+    if (this.#policy.mode === "online") return this.verifyOnline<TPayload>(compactJws, options);
     return this.verifySync<TPayload>(compactJws, options);
   }
 
@@ -535,7 +847,7 @@ export class JwsVerifier {
     if (this.#policy.mode === "online") {
       throw new VerificationError(
         "online-unavailable",
-        "Online verification is implemented in task 05",
+        "Online verification requires the asynchronous verify() method",
       );
     }
     if (options.effectiveTime !== undefined && !isEffectiveTime(options.effectiveTime)) {
@@ -568,6 +880,110 @@ export class JwsVerifier {
       protectedHeader: parsed.protectedHeader,
       payload: payload as TPayload,
     });
+  }
+
+  private async verifyOnline<TPayload = unknown>(
+    compactJws: string,
+    options: VerifyOptions,
+  ): Promise<VerifiedJws<TPayload>> {
+    if (options.effectiveTime !== undefined) {
+      throw new VerificationError(
+        "invalid-effective-time",
+        "effectiveTime is only supported in offline verification",
+      );
+    }
+    const parsed = parseCompactJws(compactJws, this.limits, this.#policy.algorithm);
+    const [leafDer, intermediateDer, presentedRootDer] = parsed.certificates as [
+      Uint8Array,
+      Uint8Array,
+      Uint8Array?,
+    ];
+    const prepared = this.prepareChain(leafDer, intermediateDer);
+    ensurePublicKey(prepared.leaf.certificate.publicKey);
+    verifyJwsSignature(parsed, prepared.leaf);
+    const payload = decodeJson(parsed.payloadBytes, "Payload");
+    const effectiveTime = this.clock();
+    if (!isEffectiveTime(effectiveTime)) {
+      throw new VerificationError("invalid-effective-time", "clock must return Unix milliseconds");
+    }
+    this.verifyChain(prepared, effectiveTime);
+    const root = verifyTrustAnchor(prepared, presentedRootDer, effectiveTime);
+    validateClaims(payload, this.#policy);
+    const ocspPolicy = ocspPolicyFor(this.#policy);
+    const leafEndpoint = chooseOcspEndpoint(prepared.leaf, ocspPolicy);
+    const intermediateEndpoint = chooseOcspEndpoint(prepared.intermediate, ocspPolicy);
+    await this.verifyOcsp(prepared.leaf, prepared.intermediate, effectiveTime, leafEndpoint);
+    await this.verifyOcsp(prepared.intermediate, root, effectiveTime, intermediateEndpoint);
+    return Object.freeze({
+      compactJws,
+      protectedHeader: parsed.protectedHeader,
+      payload: payload as TPayload,
+    });
+  }
+
+  private async requestOcsp(url: string, body: Uint8Array): Promise<Uint8Array> {
+    const policy = ocspPolicyFor(this.#policy);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), policy.timeoutMs);
+    let raceTimer: ReturnType<typeof setTimeout> | undefined;
+    const request =
+      this.ocspTransport ??
+      ((input: OcspTransportRequest) =>
+        fetchOcspResponse(input.url, input.body, input.signal, {
+          maxResponseBytes: policy.maxResponseBytes,
+        }));
+    try {
+      const response = await Promise.race([
+        request({ url, body, signal: controller.signal }),
+        new Promise<Uint8Array>((_, reject) => {
+          raceTimer = setTimeout(
+            () => reject(new Error("OCSP request timed out")),
+            policy.timeoutMs,
+          );
+        }),
+      ]);
+      if (!(response instanceof Uint8Array) || response.byteLength > policy.maxResponseBytes) {
+        throw new Error("OCSP response exceeds the configured body limit");
+      }
+      return response;
+    } catch (error) {
+      if (error instanceof VerificationError) throw error;
+      throw new VerificationError("transport-error", "OCSP transport failed", error);
+    } finally {
+      clearTimeout(timer);
+      if (raceTimer !== undefined) clearTimeout(raceTimer);
+    }
+  }
+
+  private async verifyOcsp(
+    certificate: PreparedCertificate,
+    issuer: PreparedCertificate,
+    effectiveTime: number,
+    endpoint: string,
+  ): Promise<void> {
+    const policy = ocspPolicyFor(this.#policy);
+    const request = buildOcspRequest(certificate, issuer);
+    const responseBytes = await this.requestOcsp(endpoint, request);
+    let response: ReturnType<typeof parseOcspResponse>;
+    try {
+      response = parseOcspResponse(responseBytes);
+    } catch (error) {
+      throw new VerificationError("ocsp-format", "OCSP response is malformed", error);
+    }
+    if (response.responseStatus !== 0) {
+      throw new VerificationError(
+        "ocsp-status",
+        `OCSP responder returned status ${response.responseStatus}`,
+      );
+    }
+    if (response.responseType !== "1.3.6.1.5.5.7.48.1.1" || response.basic === undefined) {
+      throw new VerificationError("ocsp-format", "OCSP response is not BasicOCSPResponse");
+    }
+    if (!policy.allowedSignatureAlgorithms.includes(response.basic.signatureAlgorithm.oid)) {
+      throw new VerificationError("ocsp-policy", "OCSP signature algorithm is not allowed");
+    }
+    verifyOcspSignature(response.basic, issuer, effectiveTime);
+    verifyOcspStatus(response.basic, certificate, issuer, effectiveTime, policy);
   }
 
   private prepareChain(leafDer: Uint8Array, intermediateDer: Uint8Array): PreparedChain {

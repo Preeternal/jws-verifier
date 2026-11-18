@@ -20,7 +20,7 @@ export interface PreparedChain {
   readonly roots: readonly PreparedCertificate[];
 }
 
-const prepareCertificate = (input: Uint8Array): PreparedCertificate => {
+export const prepareCertificate = (input: Uint8Array): PreparedCertificate => {
   if (input.byteLength > DEFAULT_DER_LIMITS.maxInputBytes) {
     throw new DerParseError("input-too-large", "DER input exceeds the configured limit", 0);
   }
