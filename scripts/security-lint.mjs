@@ -1,7 +1,15 @@
 import { spawnSync } from "node:child_process";
 
 const semgrepVersion = "1.165.0";
-const semgrepArguments = ["scan", "--config", "semgrep.yml", "--error", "source", "test"];
+const semgrepArguments = [
+  "scan",
+  "--no-git-ignore",
+  "--config",
+  "semgrep.yml",
+  "--error",
+  "source",
+  "test",
+];
 const forceUvx = process.env.SECURITY_LINT_FORCE_UVX === "1";
 
 const runCommand = (command, arguments_) =>

@@ -1,6 +1,7 @@
 {
   "extends": "@sindresorhus/tsconfig",
   "compilerOptions": {
+    "types": ["node"],
     "outDir": "dist",
     "rootDir": "source",
     "noUnusedLocals": false,

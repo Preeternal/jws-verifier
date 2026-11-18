@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
+import { parseX509CertificateMetadata } from "../../source/x509/certificate-metadata.js";
 
 const fixture = (name: string): string =>
   readFileSync(new URL(`../fixtures/apple-compat/${name}`, import.meta.url), "utf8").trim();
@@ -9,6 +10,21 @@ const decodeJson = (value: string): Record<string, unknown> =>
   JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Record<string, unknown>;
 
 describe("Apple compatibility fixture smoke test", () => {
+  it("extracts certificate markers and exact subject bytes from the snapshot", () => {
+    const header = decodeJson(fixture("test-notification.jws").split(".")[0] ?? "");
+    const [leaf, intermediate, root] = (header.x5c as string[]).map((value) =>
+      Buffer.from(value, "base64"),
+    );
+    const metadata = parseX509CertificateMetadata(leaf);
+    expect(metadata.apple).toEqual({ leaf: true, intermediate: false });
+    expect(parseX509CertificateMetadata(intermediate).apple).toEqual({
+      leaf: false,
+      intermediate: true,
+    });
+    expect(parseX509CertificateMetadata(root).version).toBe(0);
+    const { offset, length } = metadata.subject;
+    expect(leaf.subarray(offset, offset + length)).toEqual(leaf.subarray(139, 210));
+  });
   it("loads the accepted notification snapshot", () => {
     const parts = fixture("test-notification.jws").split(".");
     const header = decodeJson(parts[0] ?? "");

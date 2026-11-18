@@ -2,6 +2,12 @@
 module.exports = {
   forbidden: [
     {
+      name: "der-metadata-not-to-native-crypto",
+      severity: "error",
+      from: { path: "^source/(asn1/|x509/certificate-metadata\\.ts$)" },
+      to: { dependencyTypes: ["core"] },
+    },
+    {
       name: "no-circular",
       severity: "error",
       from: {},
