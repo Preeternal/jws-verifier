@@ -65,16 +65,16 @@ authenticity or purchase entitlement.
 
 ## Performance
 
-CPU time per verification (median / p95) on Linux GitHub Actions at `8fe678a`.
+CPU time per verification (median / p95) on Linux GitHub Actions at `164e443`.
 The benchmark uses synthetic ES256 JWS and OCSP responses replayed from memory.
 
-| Scenario                       | Node 22 · Xeon | Node 24 · EPYC |
-| ------------------------------ | -------------: | -------------: |
-| First verification after setup | 7.11 / 7.48 ms | 5.46 / 7.89 ms |
-| Warm cache miss                | 1.24 / 3.94 ms | 0.68 / 1.31 ms |
-| Warm cache hit                 | 0.14 / 0.49 ms | 0.08 / 0.48 ms |
+| Scenario                       | Node 22 · EPYC 9V74 | Node 24 · EPYC 9V74 |
+| ------------------------------ | ------------------: | ------------------: |
+| First verification after setup |      5.65 / 5.89 ms |      8.31 / 8.76 ms |
+| Warm cache miss                |      1.12 / 1.83 ms |      1.38 / 3.41 ms |
+| Warm cache hit                 |      0.12 / 0.84 ms |      0.15 / 0.81 ms |
 
-Run locally with `yarn benchmark:ci`. [Node 22 CI report](https://github.com/Preeternal/jws-verifier/actions/runs/44414540308/attempts/1#summary-135191235409) · [Node 24 CI report](https://github.com/Preeternal/jws-verifier/actions/runs/44414540308/attempts/1#summary-135191235313)
+Run locally with `yarn benchmark:ci`. [Node 22 CI report](https://github.com/Preeternal/jws-verifier/actions/runs/44624487233/attempts/1#summary-135914557381) · [Node 24 CI report](https://github.com/Preeternal/jws-verifier/actions/runs/44624487233/attempts/1#summary-135914557677)
 
 ## Contributing
 
