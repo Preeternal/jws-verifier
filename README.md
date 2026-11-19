@@ -1,7 +1,8 @@
 # `@preeternal/jws-verifier`
 
 [![npm version](https://img.shields.io/npm/v/@preeternal/jws-verifier.svg)](https://www.npmjs.com/package/@preeternal/jws-verifier)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![npm downloads](https://img.shields.io/npm/dm/@preeternal/jws-verifier.svg)](https://www.npmjs.com/package/@preeternal/jws-verifier)
+[![Patreon](https://img.shields.io/endpoint?url=https%3A%2F%2Fshieldsio-patreon.vercel.app%2Fapi%2F%3Fusername%3Dpreeternal%26type%3Dpatrons)](https://www.patreon.com/preeternal)
 
 TypeScript library for verifying compact ES256 JWS with X.509 certificate chains
 and optional OCSP revocation checks.
