@@ -72,6 +72,11 @@ performs a publish dry run. It also installs the generated tarball in a
 temporary consumer and checks ESM import and dynamic import from CommonJS.
 Yarn may need registry access to install the tarball's runtime dependencies.
 
+## Release tooling
+
+Before a future GitHub Release, bump `version` in `package.json` and use the
+matching `v<version>` tag.
+
 ## Benchmarks and Worker startup
 
 The public benchmark is synthetic and offline. CPU and wall time are measured

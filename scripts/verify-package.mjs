@@ -53,7 +53,10 @@ for (const file of requiredFiles) {
 }
 
 for (const file of publishedFiles) {
-  if (!["LICENSE", "README.md", "package.json"].includes(file) && !file.startsWith("dist/")) {
+  if (
+    !["CHANGELOG.md", "LICENSE", "README.md", "package.json"].includes(file) &&
+    !file.startsWith("dist/")
+  ) {
     throw new Error(`Unexpected file in package: ${file}`);
   }
 }
