@@ -1,13 +1,14 @@
 import { verify, X509Certificate } from "node:crypto";
 
+import { Object as TypeObject, String as TypeString, Tuple as TypeTuple } from "typebox/type";
+import { Value } from "typebox/value";
 import { describe, expect, it } from "vitest";
-import { z } from "zod/mini";
 
 import { benchmarkFixtures, benchmarkPolicy, verificationClockMs } from "./benchmark-fixtures.js";
 
-const protectedHeader = z.object({
-  alg: z.string(),
-  x5c: z.tuple([z.string(), z.string(), z.string()]),
+const protectedHeader = TypeObject({
+  alg: TypeString(),
+  x5c: TypeTuple([TypeString(), TypeString(), TypeString()]),
 });
 
 describe("public benchmark fixture catalog", () => {
@@ -44,7 +45,8 @@ describe("public benchmark fixture catalog", () => {
 
     for (const fixture of benchmarkFixtures) {
       const [header = "", payload = "", signature = ""] = fixture.jws.split(".");
-      const { alg, x5c } = protectedHeader.parse(
+      const { alg, x5c } = Value.Parse(
+        protectedHeader,
         JSON.parse(Buffer.from(header, "base64url").toString("utf8")),
       );
       const leaf = new X509Certificate(Buffer.from(x5c[0], "base64"));

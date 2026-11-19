@@ -1137,9 +1137,9 @@ __metadata:
     oxfmt: "npm:^0.53.0"
     oxlint: "npm:^1.68.0"
     publint: "npm:^0.3.21"
+    typebox: "npm:^1.4.7"
     typescript: "npm:^6.0.3"
     vitest: "npm:^4.1.8"
-    zod: "npm:^4.6.7"
   languageName: unknown
   linkType: soft
 
@@ -3975,6 +3975,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"typebox@npm:^1.4.7":
+  version: 1.4.7
+  resolution: "typebox@npm:1.4.7"
+  checksum: 10c0/eb34b0e6fb2a018d7bc514cb8bafd84980087bbd94c246ceeb036a14be8677e7a370465eb2647488f0cbb01757dc79bfe2186d97a881d2949766667ea879f78f
+  languageName: node
+  linkType: hard
+
 "typescript@npm:5.6.1-rc":
   version: 5.6.1-rc
   resolution: "typescript@npm:5.6.1-rc"
@@ -4333,12 +4340,5 @@ __metadata:
     cookie: "npm:^1.0.2"
     youch-core: "npm:^0.3.3"
   checksum: 10c0/588d65aa5837a46c8473cf57a9129115383f57aad5899915d37005950decfefc66bec85b8a1262dbefd623a122c279095074655889317311a554f9c2e290a5b3
-  languageName: node
-  linkType: hard
-
-"zod@npm:^4.6.7":
-  version: 4.6.7
-  resolution: "zod@npm:4.6.7"
-  checksum: 10c0/4ce2eb14034317b7254e347ca37b5ad591cf8333147030cf05b9b5d31692d45073f7f2747aa50cf8c6b29012194d2b22978cecc89969cf34a0d18e89d0ee7d7b
   languageName: node
   linkType: hard

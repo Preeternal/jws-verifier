@@ -42,9 +42,9 @@ const RAW_RUNTIME_STATE =
           ["oxfmt", "virtual:8ecf65cdeaed4bfb2185ed28191483c0b3d9ce565477871de4728e31dcb4d9991ae6355a0a7ced1e682c16a64d3bcf01f3c2354cbae8170ac45eec56839ea702#npm:0.53.0"],\
           ["oxlint", "virtual:8ecf65cdeaed4bfb2185ed28191483c0b3d9ce565477871de4728e31dcb4d9991ae6355a0a7ced1e682c16a64d3bcf01f3c2354cbae8170ac45eec56839ea702#npm:1.94.0"],\
           ["publint", "npm:0.3.25"],\
+          ["typebox", "npm:1.4.7"],\
           ["typescript", "patch:typescript@npm%3A6.0.3#optional!builtin<compat/typescript>::version=6.0.3&hash=5786d5"],\
-          ["vitest", "virtual:8ecf65cdeaed4bfb2185ed28191483c0b3d9ce565477871de4728e31dcb4d9991ae6355a0a7ced1e682c16a64d3bcf01f3c2354cbae8170ac45eec56839ea702#npm:4.1.12"],\
-          ["zod", "npm:4.6.7"]\
+          ["vitest", "virtual:8ecf65cdeaed4bfb2185ed28191483c0b3d9ce565477871de4728e31dcb4d9991ae6355a0a7ced1e682c16a64d3bcf01f3c2354cbae8170ac45eec56839ea702#npm:4.1.12"]\
         ],\
         "linkType": "SOFT"\
       }]\
@@ -1376,9 +1376,9 @@ const RAW_RUNTIME_STATE =
           ["oxfmt", "virtual:8ecf65cdeaed4bfb2185ed28191483c0b3d9ce565477871de4728e31dcb4d9991ae6355a0a7ced1e682c16a64d3bcf01f3c2354cbae8170ac45eec56839ea702#npm:0.53.0"],\
           ["oxlint", "virtual:8ecf65cdeaed4bfb2185ed28191483c0b3d9ce565477871de4728e31dcb4d9991ae6355a0a7ced1e682c16a64d3bcf01f3c2354cbae8170ac45eec56839ea702#npm:1.94.0"],\
           ["publint", "npm:0.3.25"],\
+          ["typebox", "npm:1.4.7"],\
           ["typescript", "patch:typescript@npm%3A6.0.3#optional!builtin<compat/typescript>::version=6.0.3&hash=5786d5"],\
-          ["vitest", "virtual:8ecf65cdeaed4bfb2185ed28191483c0b3d9ce565477871de4728e31dcb4d9991ae6355a0a7ced1e682c16a64d3bcf01f3c2354cbae8170ac45eec56839ea702#npm:4.1.12"],\
-          ["zod", "npm:4.6.7"]\
+          ["vitest", "virtual:8ecf65cdeaed4bfb2185ed28191483c0b3d9ce565477871de4728e31dcb4d9991ae6355a0a7ced1e682c16a64d3bcf01f3c2354cbae8170ac45eec56839ea702#npm:4.1.12"]\
         ],\
         "linkType": "SOFT"\
       }]\
@@ -4384,6 +4384,15 @@ const RAW_RUNTIME_STATE =
         "linkType": "HARD"\
       }]\
     ]],\
+    ["typebox", [\
+      ["npm:1.4.7", {\
+        "packageLocation": "../../.yarn/berry/cache/typebox-npm-1.4.7-ffd2b73c04-10c0.zip/node_modules/typebox/",\
+        "packageDependencies": [\
+          ["typebox", "npm:1.4.7"]\
+        ],\
+        "linkType": "HARD"\
+      }]\
+    ]],\
     ["typescript", [\
       ["patch:typescript@npm%3A5.6.1-rc#optional!builtin<compat/typescript>::version=5.6.1-rc&hash=8c6c40", {\
         "packageLocation": "../../.yarn/berry/cache/typescript-patch-f14503dcf9-10c0.zip/node_modules/typescript/",\
@@ -4758,15 +4767,6 @@ const RAW_RUNTIME_STATE =
           ["@poppinss/exception", "npm:1.2.3"],\
           ["error-stack-parser-es", "npm:1.0.5"],\
           ["youch-core", "npm:0.3.3"]\
-        ],\
-        "linkType": "HARD"\
-      }]\
-    ]],\
-    ["zod", [\
-      ["npm:4.6.7", {\
-        "packageLocation": "../../.yarn/berry/cache/zod-npm-4.6.7-93f9f3c3ad-10c0.zip/node_modules/zod/",\
-        "packageDependencies": [\
-          ["zod", "npm:4.6.7"]\
         ],\
         "linkType": "HARD"\
       }]\

@@ -1,27 +1,20 @@
 // biome-ignore lint/correctness/noNodejsModules: Native crypto is the intentional verification boundary.
 import { type KeyObject, verify as verifySignature } from "node:crypto";
 
+import { Compile, type Validator } from "typebox/compile";
+import type { Static, TSchema } from "typebox/type";
 import {
-  array,
-  boolean,
-  custom,
-  int,
-  literal,
-  looseObject,
-  maximum,
-  minimum,
-  minLength,
-  number,
-  optional,
-  type output,
-  positive,
-  refine,
-  regex,
-  strictObject,
-  string,
-  _default as zodDefault,
-  enum as zodEnum,
-} from "zod/mini";
+  Array as TypeArray,
+  Boolean as TypeBoolean,
+  Function as TypeFunction,
+  Integer as TypeInteger,
+  Literal as TypeLiteral,
+  Object as TypeObject,
+  Optional as TypeOptional,
+  String as TypeString,
+  Union as TypeUnion,
+} from "typebox/type";
+import { Value } from "typebox/value";
 
 import { DerReader } from "../asn1/der-reader.js";
 import {
@@ -55,79 +48,109 @@ const standardBase64Pattern = /^[A-Za-z0-9+/]*={0,2}$/;
 const base64UrlPaddingPattern = /={0,2}$/u;
 const trailingPaddingPattern = /=+$/u;
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
-const claimPathSchema = array(string().check(minLength(1))).check(minLength(1));
-const oidSchema = string().check(regex(/^[012](\.(0|[1-9][0-9]*)){1,63}$/u));
-const protectedHeaderSchema = looseObject({ alg: string(), x5c: array(string()) });
-const ocspPolicySchema = strictObject({
-  allowedEndpoints: optional(array(string().check(minLength(1)))),
-  timeoutMs: zodDefault(number().check(int(), positive(), maximum(60_000)), 5_000),
-  maxResponseBytes: zodDefault(
-    number().check(int(), positive(), maximum(16 * 1024 * 1024)),
-    256 * 1024,
-  ),
-  allowMissingNextUpdate: zodDefault(boolean(), false),
-  maxAgeMs: zodDefault(number().check(int(), positive()), 15 * 60 * 1000),
-  allowedSignatureAlgorithms: zodDefault(array(string().check(minLength(1))), [
-    "1.2.840.10045.4.3.2",
-    "1.2.840.10045.4.3.3",
-    "1.2.840.10045.4.3.4",
-    "1.2.840.113549.1.1.11",
-    "1.2.840.113549.1.1.12",
-    "1.2.840.113549.1.1.13",
-  ]),
+const claimPathSchema = TypeArray(TypeString({ minLength: 1 }), { minItems: 1 });
+const oidSchema = TypeString({ pattern: "^[012](\\.(0|[1-9][0-9]*)){1,63}$" });
+const protectedHeaderSchema = TypeObject({ alg: TypeString(), x5c: TypeArray(TypeString()) });
+const ocspPolicySchema = TypeObject({
+  allowedEndpoints: TypeOptional(TypeArray(TypeString({ minLength: 1 }))),
+  timeoutMs: TypeInteger({ minimum: 1, maximum: 60_000, default: 5_000 }),
+  maxResponseBytes: TypeInteger({
+    minimum: 1,
+    maximum: 16 * 1024 * 1024,
+    default: 256 * 1024,
+  }),
+  allowMissingNextUpdate: TypeBoolean({ default: false }),
+  maxAgeMs: TypeInteger({ minimum: 1, default: 15 * 60 * 1000 }),
+  allowedSignatureAlgorithms: TypeArray(TypeString({ minLength: 1 }), {
+    default: [
+      "1.2.840.10045.4.3.2",
+      "1.2.840.10045.4.3.3",
+      "1.2.840.10045.4.3.4",
+      "1.2.840.113549.1.1.11",
+      "1.2.840.113549.1.1.12",
+      "1.2.840.113549.1.1.13",
+    ],
+  }),
 });
 
-const verifierPolicySchema = strictObject({
-  mode: zodDefault(zodEnum(["offline", "online"]), "offline"),
-  algorithm: zodDefault(literal("ES256"), "ES256"),
-  application: optional(string().check(minLength(1))),
-  environment: optional(string().check(minLength(1))),
-  claimPaths: optional(
-    strictObject({
-      application: optional(claimPathSchema),
-      environment: optional(claimPathSchema),
-    }),
-  ),
-  signedTimePath: optional(claimPathSchema),
-  requiredExtensions: optional(
-    strictObject({
-      leaf: optional(array(oidSchema)),
-      intermediate: optional(array(oidSchema)),
-    }),
-  ),
-  ocsp: optional(ocspPolicySchema),
-  validateClaims: optional(
-    custom<NonNullable<VerifierPolicy["validateClaims"]>>((value) => typeof value === "function"),
-  ),
-}).check(
-  refine(
-    ({ application, claimPaths }) => application === undefined || !!claimPaths?.application,
-    "An expected application requires an explicit application claim path",
-  ),
-  refine(
-    ({ environment, claimPaths }) => environment === undefined || !!claimPaths?.environment,
-    "An expected environment requires an explicit environment claim path",
-  ),
+const verifierPolicySchema = TypeObject(
+  {
+    mode: TypeUnion([TypeLiteral("offline"), TypeLiteral("online")], { default: "offline" }),
+    algorithm: TypeLiteral("ES256", { default: "ES256" }),
+    application: TypeOptional(TypeString({ minLength: 1 })),
+    environment: TypeOptional(TypeString({ minLength: 1 })),
+    claimPaths: TypeOptional(
+      TypeObject(
+        {
+          application: TypeOptional(claimPathSchema),
+          environment: TypeOptional(claimPathSchema),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    signedTimePath: TypeOptional(claimPathSchema),
+    requiredExtensions: TypeOptional(
+      TypeObject(
+        {
+          leaf: TypeOptional(TypeArray(oidSchema)),
+          intermediate: TypeOptional(TypeArray(oidSchema)),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    ocsp: TypeOptional(ocspPolicySchema),
+    validateClaims: TypeOptional(TypeFunction([], TypeBoolean())),
+  },
+  { additionalProperties: false },
 );
 
-const verifierLimitsSchema = looseObject({
-  maxCompactJwsBytes: zodDefault(number().check(int(), positive()), MAX_DEFAULT_COMPACT_JWS_BYTES),
-  maxProtectedHeaderBytes: zodDefault(
-    number().check(int(), positive()),
-    MAX_DEFAULT_PROTECTED_HEADER_BYTES,
-  ),
-  maxPayloadBytes: zodDefault(number().check(int(), positive()), MAX_DEFAULT_PAYLOAD_BYTES),
-  maxX5cEntries: zodDefault(number().check(int(), minimum(2), maximum(MAX_DEFAULT_X5C_ENTRIES)), 3),
-  maxCertificateBytes: zodDefault(number().check(int(), positive()), MAX_DEFAULT_CERTIFICATE_BYTES),
-  maxCacheEntries: zodDefault(
-    number().check(int(), positive(), maximum(4096)),
-    MAX_DEFAULT_CACHE_ENTRIES,
-  ),
-  cacheTtlMs: zodDefault(
-    number().check(int(), positive(), maximum(365 * 24 * 60 * 60 * 1000)),
-    MAX_DEFAULT_CACHE_TTL_MS,
-  ),
+const verifierLimitsSchema = TypeObject({
+  maxCompactJwsBytes: TypeInteger({ minimum: 1, default: MAX_DEFAULT_COMPACT_JWS_BYTES }),
+  maxProtectedHeaderBytes: TypeInteger({
+    minimum: 1,
+    default: MAX_DEFAULT_PROTECTED_HEADER_BYTES,
+  }),
+  maxPayloadBytes: TypeInteger({ minimum: 1, default: MAX_DEFAULT_PAYLOAD_BYTES }),
+  maxX5cEntries: TypeInteger({
+    minimum: 2,
+    maximum: MAX_DEFAULT_X5C_ENTRIES,
+    default: 3,
+  }),
+  maxCertificateBytes: TypeInteger({ minimum: 1, default: MAX_DEFAULT_CERTIFICATE_BYTES }),
+  maxCacheEntries: TypeInteger({ minimum: 1, maximum: 4096, default: MAX_DEFAULT_CACHE_ENTRIES }),
+  cacheTtlMs: TypeInteger({
+    minimum: 1,
+    maximum: 365 * 24 * 60 * 60 * 1000,
+    default: MAX_DEFAULT_CACHE_TTL_MS,
+  }),
 });
+
+const protectedHeaderValidator = Compile(protectedHeaderSchema);
+const verifierPolicyValidator = Compile(verifierPolicySchema);
+const verifierLimitsValidator = Compile(verifierLimitsSchema);
+
+const validateSchema = <TSchemaType extends TSchema>(
+  _schema: TSchemaType,
+  validator: Validator,
+  value: unknown,
+  label: string,
+): Static<TSchemaType> => {
+  const defaulted = validator.Default(Value.Clone(value));
+  if (!validator.Check(defaulted)) {
+    const error = validator.Errors(defaulted)[0];
+    throw new TypeError(`${label}: ${error?.message ?? "value does not match the schema"}`);
+  }
+  return defaulted as Static<TSchemaType>;
+};
+
+const parseSchema = <TSchemaType extends TSchema>(
+  _schema: TSchemaType,
+  validator: Validator,
+  value: unknown,
+): Static<TSchemaType> | undefined => {
+  if (!validator.Check(value)) return undefined;
+  return value as Static<TSchemaType>;
+};
 
 const standardBase64 = (value: string, field: string): Uint8Array => {
   const paddingStart = value.indexOf("=");
@@ -454,7 +477,7 @@ export interface VerifiedJws<TPayload = unknown> {
   readonly payload: TPayload;
 }
 
-type NormalizedVerifierPolicy = output<typeof verifierPolicySchema>;
+type NormalizedVerifierPolicy = Static<typeof verifierPolicySchema>;
 
 interface NormalizedOcspPolicy {
   readonly allowedEndpoints?: readonly string[];
@@ -500,19 +523,32 @@ const freezeHeader = (header: {
   Object.freeze({ ...header, x5c: Object.freeze([...header.x5c]) });
 
 const normalizePolicy = (policy: VerifierPolicy): NormalizedVerifierPolicy => {
-  const parsed = verifierPolicySchema.safeParse(policy);
-  if (!parsed.success) {
-    throw new TypeError(`Invalid verifier policy: ${parsed.error.message}`);
+  const normalized = validateSchema(
+    verifierPolicySchema,
+    verifierPolicyValidator,
+    policy,
+    "Invalid verifier policy",
+  );
+  if (normalized.application !== undefined && normalized.claimPaths?.application === undefined) {
+    throw new TypeError(
+      "Invalid verifier policy: An expected application requires an explicit application claim path",
+    );
   }
-  return parsed.data;
+  if (normalized.environment !== undefined && normalized.claimPaths?.environment === undefined) {
+    throw new TypeError(
+      "Invalid verifier policy: An expected environment requires an explicit environment claim path",
+    );
+  }
+  return normalized;
 };
 
 const normalizeLimits = (limits: VerifierLimits | undefined): NormalizedVerifierLimits => {
-  const parsed = verifierLimitsSchema.safeParse(limits ?? {});
-  if (!parsed.success) {
-    throw new TypeError(`Invalid verifier limits: ${parsed.error.message}`);
-  }
-  return parsed.data as NormalizedVerifierLimits;
+  return validateSchema(
+    verifierLimitsSchema,
+    verifierLimitsValidator,
+    limits ?? {},
+    "Invalid verifier limits",
+  );
 };
 
 const normalizeRoots = (roots: readonly (Uint8Array | TrustedRoot)[]): readonly Uint8Array[] => {
@@ -567,14 +603,13 @@ const parseCompactJws = (
   }
 
   const protectedValue = decodeJson(protectedBytes, "Protected header", "invalid-header");
-  const headerResult = protectedHeaderSchema.safeParse(protectedValue);
-  if (!headerResult.success) {
+  const header = parseSchema(protectedHeaderSchema, protectedHeaderValidator, protectedValue);
+  if (header === undefined) {
     throw new VerificationError(
       "invalid-header",
       "Protected header does not match the JWS contract",
     );
   }
-  const header = headerResult.data;
   if (Object.hasOwn(header, "crit") || Object.hasOwn(header, "b64")) {
     throw new VerificationError("invalid-header", "Unsupported critical JWS header parameter");
   }
