@@ -85,7 +85,10 @@ const keyHash = (algorithm: "sha1" | "sha256", key: KeyObject): Buffer => {
 const responseTime = (value: string) => tlv(0x18, Buffer.from(value));
 
 /** Generates independent synthetic keys in memory with fixed certificate dates. */
-export const makeSignedFixture = (criticalExtension?: "leaf" | "intermediate") => {
+export const makeSignedFixture = (
+  criticalExtension?: "leaf" | "intermediate",
+  ocspEndpoints: readonly [leaf: string, intermediate: string] = signedOcspEndpoints,
+) => {
   const root = publicKeyPair();
   const rotated = publicKeyPair();
   const issuer = publicKeyPair();
@@ -112,7 +115,7 @@ export const makeSignedFixture = (criticalExtension?: "leaf" | "intermediate") =
     subjectKey: issuer.publicKey,
     ca: true,
     extraExtensions: [
-      aia(signedOcspEndpoints[1]),
+      aia(ocspEndpoints[1]),
       ...(criticalExtension === "intermediate"
         ? [extension("551d25", sequence(oid("2b06010505070309")), true)]
         : []),
@@ -126,7 +129,7 @@ export const makeSignedFixture = (criticalExtension?: "leaf" | "intermediate") =
     subjectKey: signer.publicKey,
     ca: false,
     extraExtensions: [
-      aia(signedOcspEndpoints[0]),
+      aia(ocspEndpoints[0]),
       extension("2a0304", sequence(), criticalExtension === "leaf"),
     ],
   });
@@ -150,8 +153,8 @@ export const makeSignedFixture = (criticalExtension?: "leaf" | "intermediate") =
     scenario: "byKey" | "issuer-name" | "delegate-name" | "unauthorized",
     nextUpdate = "20250102000000Z",
   ): Buffer => {
-    const forLeaf = url === signedOcspEndpoints[0];
-    if (!forLeaf && url !== signedOcspEndpoints[1]) throw new Error("Unexpected replay URL");
+    const forLeaf = url === ocspEndpoints[0];
+    if (!forLeaf && url !== ocspEndpoints[1]) throw new Error("Unexpected replay URL");
     const ca = forLeaf ? issuer : root;
     const caName = forLeaf ? intermediateName : rootName;
     const responderName = scenario === "issuer-name" ? caName : name("Fixture OCSP Delegate");

@@ -3,19 +3,9 @@ import { Buffer } from "node:buffer";
 
 import { createVerifier } from "@preeternal/jws-verifier";
 
-import { ocspRequestKey } from "../../benchmark/ocsp-replay.mjs";
 import { benchmarkFixtures, benchmarkPolicy } from "../../test/fixtures/benchmark-fixtures.ts";
 
 const fixture = benchmarkFixtures.find(({ id }) => id === "jws.synthetic.valid-cold");
-const replay = new Map(
-  fixture.transport.map(({ url, requestBase64, responseBase64 }) => [
-    url,
-    {
-      key: ocspRequestKey(Buffer.from(requestBase64, "base64")),
-      response: Buffer.from(responseBase64, "base64"),
-    },
-  ]),
-);
 const verifier = createVerifier({
   trustedRoots: benchmarkPolicy.trustedRootsBase64.map((value) => Buffer.from(value, "base64")),
   clock: () => fixture.clockMs,
@@ -24,12 +14,7 @@ const verifier = createVerifier({
     application: benchmarkPolicy.application,
     environment: benchmarkPolicy.environment,
     claimPaths: { application: ["application"], environment: ["environment"] },
-    ocsp: { allowedEndpoints: [...replay.keys()] },
-  },
-  async ocspTransport({ url, body }) {
-    const entry = replay.get(url);
-    if (entry?.key !== ocspRequestKey(body)) throw new Error("Unexpected OCSP request");
-    return entry.response;
+    ocsp: { allowedEndpoints: fixture.transport.map(({ url }) => url) },
   },
 });
 

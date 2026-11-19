@@ -59,7 +59,7 @@ export const fetchOcspResponse = async (
     method: "POST",
     body: body as unknown as BodyInit,
     signal,
-    redirect: "error",
+    redirect: "manual",
     headers: {
       accept: contentType,
       "content-type": "application/ocsp-request",
