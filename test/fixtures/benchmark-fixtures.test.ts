@@ -1,7 +1,7 @@
 import { verify, X509Certificate } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
+import { z } from "zod/mini";
 
 import { benchmarkFixtures, benchmarkPolicy, verificationClockMs } from "./benchmark-fixtures.js";
 

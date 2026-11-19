@@ -5,15 +5,23 @@ import {
   array,
   boolean,
   custom,
+  int,
   literal,
   looseObject,
+  maximum,
+  minimum,
+  minLength,
   number,
-  object,
+  optional,
   type output,
+  positive,
+  refine,
+  regex,
   strictObject,
   string,
+  _default as zodDefault,
   enum as zodEnum,
-} from "zod";
+} from "zod/mini";
 
 import { DerReader } from "../asn1/der-reader.js";
 import {
@@ -47,23 +55,19 @@ const standardBase64Pattern = /^[A-Za-z0-9+/]*={0,2}$/;
 const base64UrlPaddingPattern = /={0,2}$/u;
 const trailingPaddingPattern = /=+$/u;
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
-const claimPathSchema = array(string().min(1)).min(1);
-const oidSchema = string().regex(/^[012](\.(0|[1-9][0-9]*)){1,63}$/u);
+const claimPathSchema = array(string().check(minLength(1))).check(minLength(1));
+const oidSchema = string().check(regex(/^[012](\.(0|[1-9][0-9]*)){1,63}$/u));
 const protectedHeaderSchema = looseObject({ alg: string(), x5c: array(string()) });
 const ocspPolicySchema = strictObject({
-  allowedEndpoints: array(string().min(1)).optional(),
-  timeoutMs: number().int().positive().max(60_000).default(5_000),
-  maxResponseBytes: number()
-    .int()
-    .positive()
-    .max(16 * 1024 * 1024)
-    .default(256 * 1024),
-  allowMissingNextUpdate: boolean().default(false),
-  maxAgeMs: number()
-    .int()
-    .positive()
-    .default(15 * 60 * 1000),
-  allowedSignatureAlgorithms: array(string().min(1)).default([
+  allowedEndpoints: optional(array(string().check(minLength(1)))),
+  timeoutMs: zodDefault(number().check(int(), positive(), maximum(60_000)), 5_000),
+  maxResponseBytes: zodDefault(
+    number().check(int(), positive(), maximum(16 * 1024 * 1024)),
+    256 * 1024,
+  ),
+  allowMissingNextUpdate: zodDefault(boolean(), false),
+  maxAgeMs: zodDefault(number().check(int(), positive()), 15 * 60 * 1000),
+  allowedSignatureAlgorithms: zodDefault(array(string().check(minLength(1))), [
     "1.2.840.10045.4.3.2",
     "1.2.840.10045.4.3.3",
     "1.2.840.10045.4.3.4",
@@ -74,44 +78,56 @@ const ocspPolicySchema = strictObject({
 });
 
 const verifierPolicySchema = strictObject({
-  mode: zodEnum(["offline", "online"]).default("offline"),
-  algorithm: literal("ES256").default("ES256"),
-  application: string().min(1).optional(),
-  environment: string().min(1).optional(),
-  claimPaths: strictObject({
-    application: claimPathSchema.optional(),
-    environment: claimPathSchema.optional(),
-  }).optional(),
-  signedTimePath: claimPathSchema.optional(),
-  requiredExtensions: strictObject({
-    leaf: array(oidSchema).optional(),
-    intermediate: array(oidSchema).optional(),
-  }).optional(),
-  ocsp: ocspPolicySchema.optional(),
-  validateClaims: custom<NonNullable<VerifierPolicy["validateClaims"]>>(
-    (value) => typeof value === "function",
-  ).optional(),
-})
-  .refine(({ application, claimPaths }) => application === undefined || !!claimPaths?.application, {
-    message: "An expected application requires an explicit application claim path",
-  })
-  .refine(({ environment, claimPaths }) => environment === undefined || !!claimPaths?.environment, {
-    message: "An expected environment requires an explicit environment claim path",
-  });
+  mode: zodDefault(zodEnum(["offline", "online"]), "offline"),
+  algorithm: zodDefault(literal("ES256"), "ES256"),
+  application: optional(string().check(minLength(1))),
+  environment: optional(string().check(minLength(1))),
+  claimPaths: optional(
+    strictObject({
+      application: optional(claimPathSchema),
+      environment: optional(claimPathSchema),
+    }),
+  ),
+  signedTimePath: optional(claimPathSchema),
+  requiredExtensions: optional(
+    strictObject({
+      leaf: optional(array(oidSchema)),
+      intermediate: optional(array(oidSchema)),
+    }),
+  ),
+  ocsp: optional(ocspPolicySchema),
+  validateClaims: optional(
+    custom<NonNullable<VerifierPolicy["validateClaims"]>>((value) => typeof value === "function"),
+  ),
+}).check(
+  refine(
+    ({ application, claimPaths }) => application === undefined || !!claimPaths?.application,
+    "An expected application requires an explicit application claim path",
+  ),
+  refine(
+    ({ environment, claimPaths }) => environment === undefined || !!claimPaths?.environment,
+    "An expected environment requires an explicit environment claim path",
+  ),
+);
 
-const verifierLimitsSchema = object({
-  maxCompactJwsBytes: number().int().positive().default(MAX_DEFAULT_COMPACT_JWS_BYTES),
-  maxProtectedHeaderBytes: number().int().positive().default(MAX_DEFAULT_PROTECTED_HEADER_BYTES),
-  maxPayloadBytes: number().int().positive().default(MAX_DEFAULT_PAYLOAD_BYTES),
-  maxX5cEntries: number().int().min(2).max(MAX_DEFAULT_X5C_ENTRIES).default(3),
-  maxCertificateBytes: number().int().positive().default(MAX_DEFAULT_CERTIFICATE_BYTES),
-  maxCacheEntries: number().int().positive().max(4096).default(MAX_DEFAULT_CACHE_ENTRIES),
-  cacheTtlMs: number()
-    .int()
-    .positive()
-    .max(365 * 24 * 60 * 60 * 1000)
-    .default(MAX_DEFAULT_CACHE_TTL_MS),
-}).passthrough();
+const verifierLimitsSchema = looseObject({
+  maxCompactJwsBytes: zodDefault(number().check(int(), positive()), MAX_DEFAULT_COMPACT_JWS_BYTES),
+  maxProtectedHeaderBytes: zodDefault(
+    number().check(int(), positive()),
+    MAX_DEFAULT_PROTECTED_HEADER_BYTES,
+  ),
+  maxPayloadBytes: zodDefault(number().check(int(), positive()), MAX_DEFAULT_PAYLOAD_BYTES),
+  maxX5cEntries: zodDefault(number().check(int(), minimum(2), maximum(MAX_DEFAULT_X5C_ENTRIES)), 3),
+  maxCertificateBytes: zodDefault(number().check(int(), positive()), MAX_DEFAULT_CERTIFICATE_BYTES),
+  maxCacheEntries: zodDefault(
+    number().check(int(), positive(), maximum(4096)),
+    MAX_DEFAULT_CACHE_ENTRIES,
+  ),
+  cacheTtlMs: zodDefault(
+    number().check(int(), positive(), maximum(365 * 24 * 60 * 60 * 1000)),
+    MAX_DEFAULT_CACHE_TTL_MS,
+  ),
+});
 
 const standardBase64 = (value: string, field: string): Uint8Array => {
   const paddingStart = value.indexOf("=");
