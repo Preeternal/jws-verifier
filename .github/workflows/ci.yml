@@ -23,8 +23,8 @@ jobs:
         node: [22.x, 24.x]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
       - run: corepack enable
@@ -37,14 +37,14 @@ jobs:
     name: Release package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22.x
       - run: corepack enable
       - run: yarn install --immutable
       - name: Install uv for Semgrep
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
           python-version: "3.13"
@@ -60,8 +60,8 @@ jobs:
         node: [22.x, 24.x]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
       - run: corepack enable
@@ -75,7 +75,7 @@ jobs:
         if: ${{ !cancelled() }}
         shell: bash
         run: node scripts/benchmark-summary.mjs benchmark.json codec.json | tee benchmark.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: benchmark-node-${{ matrix.node }}
@@ -89,8 +89,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22.x
       - run: corepack enable
@@ -98,7 +98,7 @@ jobs:
       - name: Start workerd and measure startup
         shell: bash
         run: yarn run workerd:smoke | tee workerd.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: workerd-smoke
           path: workerd.json
