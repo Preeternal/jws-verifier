@@ -1,6 +1,6 @@
 {
   "name": "@preeternal/jws-verifier",
-  "version": "0.0.1-rc.0",
+  "version": "0.0.1-rc.1",
   "packageManager": "yarn@4.18.1",
   "description": "TypeScript library for secure JWS verification, X.509 certificate chain validation, and OCSP revocation checking",
   "homepage": "https://github.com/Preeternal/jws-verifier#readme",
