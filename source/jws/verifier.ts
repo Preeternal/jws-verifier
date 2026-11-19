@@ -951,18 +951,13 @@ export class JwsVerifier {
     const ocspPolicy = ocspPolicyFor(this.#policy);
     const leafEndpoint = chooseOcspEndpoint(prepared.leaf, ocspPolicy);
     const intermediateEndpoint = chooseOcspEndpoint(prepared.intermediate, ocspPolicy);
-    const leafOcspExpiry = await this.verifyOcsp(
-      prepared.leaf,
-      prepared.intermediate,
-      effectiveTime,
-      leafEndpoint,
-    );
-    const intermediateOcspExpiry = await this.verifyOcsp(
-      prepared.intermediate,
-      root,
-      effectiveTime,
-      intermediateEndpoint,
-    );
+    // Both checks are independent after the local chain and trust-anchor checks.
+    // Promise.all observes both rejections, including one that arrives after the
+    // first rejection, while exposing the first rejection to the caller.
+    const [leafOcspExpiry, intermediateOcspExpiry] = await Promise.all([
+      this.verifyOcsp(prepared.leaf, prepared.intermediate, effectiveTime, leafEndpoint),
+      this.verifyOcsp(prepared.intermediate, root, effectiveTime, intermediateEndpoint),
+    ]);
     const expiresAtMs = Math.min(
       effectiveTime + this.limits.cacheTtlMs,
       prepared.leaf.metadata.validity.notAfterMs,

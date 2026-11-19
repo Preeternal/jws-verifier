@@ -122,6 +122,7 @@ export const createReplayTransport = (
 ) => {
   let requestCount = 0;
   let mismatchCount = 0;
+  let requestIntervals = [];
   const used = new Set();
   const replay = entries.map((entry) => ({
     ...entry,
@@ -136,30 +137,49 @@ export const createReplayTransport = (
     get mismatchCount() {
       return mismatchCount;
     },
+    get requestIntervals() {
+      return requestIntervals.map((interval) => ({ ...interval }));
+    },
     reset() {
       requestCount = 0;
       mismatchCount = 0;
+      requestIntervals = [];
       used.clear();
     },
     async request(url, request) {
+      const intervals = requestIntervals;
+      const startedAtMs = performance.now();
       requestCount += 1;
-      let index = -1;
       try {
-        const key = normalizeRequest(request);
-        index = replay.findIndex(
-          (entry, position) => !used.has(position) && entry.url === url && entry.key === key,
-        );
-      } catch {
-        // A malformed request is a replay mismatch, even if the adapter catches it.
+        let index = -1;
+        try {
+          const key = normalizeRequest(request);
+          index = replay.findIndex(
+            (entry, position) => !used.has(position) && entry.url === url && entry.key === key,
+          );
+        } catch {
+          // A malformed request is a replay mismatch, even if the adapter catches it.
+        }
+        if (index === -1) {
+          mismatchCount += 1;
+          throw new Error("replay-mismatch");
+        }
+        used.add(index);
+        const entry = replay[index];
+        if (entry.delayMs !== undefined) {
+          await new Promise((resolve) => setTimeout(resolve, entry.delayMs));
+        }
+        if (entry.error) throw new Error(entry.error);
+        return Uint8Array.from(entry.response);
+      } finally {
+        const endedAtMs = performance.now();
+        intervals.push({
+          url,
+          startedAtMs,
+          endedAtMs,
+          durationMs: endedAtMs - startedAtMs,
+        });
       }
-      if (index === -1) {
-        mismatchCount += 1;
-        throw new Error("replay-mismatch");
-      }
-      used.add(index);
-      const entry = replay[index];
-      if (entry.error) throw new Error(entry.error);
-      return Uint8Array.from(entry.response);
     },
   };
 };
@@ -184,6 +204,7 @@ const timedVerify = async (verifier, input, transport) => {
     wallMicros: toMicroseconds(performance.now() - wallBefore),
     requestCount: transport.requestCount,
     mismatchCount: transport.mismatchCount,
+    requestIntervals: transport.requestIntervals,
   };
 };
 
@@ -207,7 +228,12 @@ const verificationInput = ({ jws, clockMs }) => ({ jws, clockMs });
 const runVerification = async ({ verifier, transport }, input) => {
   transport.reset();
   const result = await verifier.verify(input);
-  return { result, requestCount: transport.requestCount, mismatchCount: transport.mismatchCount };
+  return {
+    result,
+    requestCount: transport.requestCount,
+    mismatchCount: transport.mismatchCount,
+    requestIntervals: transport.requestIntervals,
+  };
 };
 
 const createWarmSampler = async (fixture, adapter, policy, options) => {
@@ -274,13 +300,13 @@ const runColdChild = async (fixture, adapterUrl, policy) => {
     transport,
   );
   const { result, ...timing } = sample;
-  const { requestCount, mismatchCount, ...verification } = timing;
+  const { requestCount, mismatchCount, requestIntervals, ...verification } = timing;
   return {
     ...verification,
     operations: 1,
     load,
     create,
-    observations: [{ ...result, requestCount, mismatchCount }],
+    observations: [{ ...result, requestCount, mismatchCount, requestIntervals }],
     failures: validateSample(fixture, sample),
   };
 };

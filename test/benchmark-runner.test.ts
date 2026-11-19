@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { execPath } from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ocspRequestKey } from "../benchmark/ocsp-replay.mjs";
 import { createReplayTransport, parseArgs, summarizeSamples } from "../benchmark/runner.mjs";
@@ -44,14 +44,57 @@ describe("benchmark runner primitives", () => {
       transport.request("http://example.test/", Uint8Array.from([1, 2])),
     ).resolves.toEqual(Uint8Array.from([3, 4]));
     expect(transport.requestCount).toBe(2);
+    expect(transport.requestIntervals).toHaveLength(2);
     transport.reset();
     await expect(transport.request("http://example.test/", Uint8Array.from([9]))).rejects.toThrow(
       "replay-mismatch",
     );
     expect(transport.requestCount).toBe(1);
     expect(transport.mismatchCount).toBe(1);
+    expect(transport.requestIntervals).toHaveLength(1);
     transport.reset();
     expect(transport.mismatchCount).toBe(0);
+    expect(transport.requestIntervals).toHaveLength(0);
+  });
+
+  it("records controlled replay delays as request intervals", async () => {
+    const transport = createReplayTransport([
+      {
+        url: "http://example.test/",
+        requestBase64: "AQI=",
+        responseBase64: "AwQ=",
+        delayMs: 1,
+      },
+    ]);
+
+    await expect(
+      transport.request("http://example.test/", Uint8Array.from([1, 2])),
+    ).resolves.toEqual(Uint8Array.from([3, 4]));
+    expect(transport.requestIntervals[0]).toMatchObject({
+      url: "http://example.test/",
+      durationMs: expect.any(Number),
+    });
+  });
+
+  it("keeps late completions out of the next replay sample", async () => {
+    vi.useFakeTimers();
+    try {
+      const url = "http://example.test/";
+      const transport = createReplayTransport([
+        { url, requestBase64: "AQ==", responseBase64: "Ag==", delayMs: 10 },
+      ]);
+      const first = transport.request(url, Uint8Array.of(1));
+      transport.reset();
+      const second = transport.request(url, Uint8Array.of(1));
+      await vi.advanceTimersByTimeAsync(10);
+      await Promise.all([first, second]);
+
+      expect(transport.requestCount).toBe(1);
+      expect(transport.mismatchCount).toBe(0);
+      expect(transport.requestIntervals).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("matches equivalent CertIDs with omitted algorithm parameters", () => {

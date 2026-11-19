@@ -89,6 +89,29 @@ outcomes and request counts alongside the timing for each sample.
 report shows median and p95 ratios for CPU and wall time (`baseline / candidate`).
 Failed series are excluded from ratios and cause a nonzero exit status.
 
+The opt-in `parallel-ocsp-suite.ts` replays two signed OCSP responses after
+80 ms and 120 ms. Build the candidate and the baseline separately, and pass
+an adapter for each build. Each adapter should import only its own build so
+that cold import measurements include a single verifier. Record both
+revisions alongside the JSON.
+
+```bash
+yarn build
+yarn benchmark -- --suite ./benchmark/parallel-ocsp-suite.ts \
+  --adapter ./benchmark/verifier-adapter.mjs --baseline /path/to/baseline/benchmark/verifier-adapter.mjs \
+  --mode warm --samples 15 --warmup 3 --batch 1 --json > /tmp/jws-ocsp-delayed.json
+yarn benchmark -- --adapter ./benchmark/verifier-adapter.mjs \
+  --baseline /path/to/baseline/benchmark/verifier-adapter.mjs \
+  --fixture jws.synthetic.valid-cold --fixture jws.synthetic.valid-warm-hit \
+  --mode all --samples 20 --warmup 10 --batch 100 --json > /tmp/jws-ocsp-immediate.json
+```
+
+Use `requestIntervals` in the delayed samples to verify the actual overlap:
+the later start should precede the earlier end for the parallel verifier.
+The span from the first start to the last end measures replay wait including
+any gap between requests. The immediate run reports import, first verification,
+warm miss, and warm hit without the artificial delays.
+
 `yarn benchmark:codec` measures X.509 chain preparation with preloaded roots,
 OCSP request encoding and response parsing, and BER receipt extraction.
 It validates each operation before timing and records CPU and wall samples.

@@ -58,7 +58,140 @@ const expectCode = async (promise: Promise<unknown>, code: VerificationError["co
   }
 };
 
+interface DeferredBytes {
+  readonly resolve: (value: Uint8Array) => void;
+  readonly reject: (reason?: unknown) => void;
+}
+
+const deferBytes = () => {
+  let handlers!: DeferredBytes;
+  const promise = new Promise<Uint8Array>((resolve, reject) => {
+    handlers = { resolve, reject };
+  });
+  return { promise, ...handlers };
+};
+
+const controlledOcsp = () => {
+  const leaf = deferBytes();
+  const intermediate = deferBytes();
+  const transport = vi.fn(async ({ body }: { body: Uint8Array }) => {
+    const key = Buffer.from(body).toString("base64");
+    if (key === benchmarkVectors.leafRequest) return leaf.promise;
+    if (key === benchmarkVectors.intermediateRequest) return intermediate.promise;
+    throw new Error("replay-mismatch");
+  });
+  return { leaf, intermediate, transport };
+};
+
 describe("online OCSP verification", () => {
+  it("starts both OCSP checks before either response resolves", async () => {
+    const { leaf, intermediate, transport } = controlledOcsp();
+    const verifier = verifierWithTransport(transport);
+    const verification = verifier.verify(benchmarkVectors.validJws);
+    let settled = false;
+    const markSettled = () => {
+      settled = true;
+    };
+    void verification.then(markSettled, markSettled);
+
+    try {
+      expect(transport).toHaveBeenCalledTimes(2);
+      const requests = transport.mock.calls.map(([{ body }]) =>
+        Buffer.from(body).toString("base64"),
+      );
+      expect(requests).toEqual(
+        expect.arrayContaining([
+          benchmarkVectors.leafRequest,
+          benchmarkVectors.intermediateRequest,
+        ]),
+      );
+      leaf.resolve(bytes(benchmarkVectors.leafGood));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(settled).toBe(false);
+
+      intermediate.resolve(bytes(benchmarkVectors.intermediateGood));
+      await expect(verification).resolves.toMatchObject({ payload: expect.any(Object) });
+    } finally {
+      leaf.resolve(bytes(benchmarkVectors.leafGood));
+      intermediate.resolve(bytes(benchmarkVectors.intermediateGood));
+      await verification.catch(() => {});
+    }
+  });
+
+  it("observes a late rejection without leaving it unhandled", async () => {
+    const { leaf, intermediate, transport } = controlledOcsp();
+    const verification = verifierWithTransport(transport).verify(benchmarkVectors.validJws);
+    const firstError = new Error("intermediate network failure");
+
+    try {
+      expect(transport).toHaveBeenCalledTimes(2);
+      intermediate.reject(firstError);
+      await expect(verification).rejects.toMatchObject({
+        code: "transport-error",
+        cause: firstError,
+      });
+      leaf.reject(new Error("late leaf network failure"));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    } finally {
+      leaf.resolve(bytes(benchmarkVectors.leafGood));
+      intermediate.resolve(bytes(benchmarkVectors.intermediateGood));
+      await verification.catch(() => {});
+    }
+  });
+
+  it.each([
+    {
+      name: "leaf network failure",
+      failingRequest: benchmarkVectors.leafRequest,
+      failure: "network failure",
+      expectedCode: "transport-error" as const,
+    },
+    {
+      name: "intermediate network failure",
+      failingRequest: benchmarkVectors.intermediateRequest,
+      failure: "network failure",
+      expectedCode: "transport-error" as const,
+    },
+    {
+      name: "leaf unacceptable response",
+      failingRequest: benchmarkVectors.leafRequest,
+      failure: benchmarkVectors.leafRevoked,
+      expectedCode: "ocsp-revoked" as const,
+    },
+    {
+      name: "intermediate unacceptable response",
+      failingRequest: benchmarkVectors.intermediateRequest,
+      failure: benchmarkVectors.leafGood,
+      expectedCode: "ocsp-policy" as const,
+    },
+  ])(
+    "does not cache a partial result after a $name",
+    async ({ failingRequest, failure, expectedCode }) => {
+      let failed = true;
+      const transport = vi.fn(async ({ body }: { body: Uint8Array }) => {
+        const key = Buffer.from(body).toString("base64");
+        if (failed && key === failingRequest) {
+          if (failure === "network failure") throw new Error(failure);
+          return bytes(failure);
+        }
+        if (key === benchmarkVectors.leafRequest) return bytes(benchmarkVectors.leafGood);
+        if (key === benchmarkVectors.intermediateRequest)
+          return bytes(benchmarkVectors.intermediateGood);
+        throw new Error("replay-mismatch");
+      });
+      const verifier = verifierWithTransport(transport);
+
+      await expectCode(verifier.verify(benchmarkVectors.validJws), expectedCode);
+      expect(transport).toHaveBeenCalledTimes(2);
+
+      failed = false;
+      await expect(verifier.verify(benchmarkVectors.validJws)).resolves.toBeTruthy();
+      expect(transport).toHaveBeenCalledTimes(4);
+      await expect(verifier.verify(benchmarkVectors.nextJws)).resolves.toBeTruthy();
+      expect(transport).toHaveBeenCalledTimes(4);
+    },
+  );
+
   it("reuses the verified chain without skipping a new JWS signature", async () => {
     const transport = vi.fn(async ({ body }: { body: Uint8Array }) => {
       const key = Buffer.from(body).toString("base64");
@@ -120,6 +253,41 @@ describe("online OCSP verification", () => {
     expect(transport).toHaveBeenCalledTimes(4);
   });
 
+  it.each(signedOcspEndpoints)(
+    "refreshes both OCSP responses when %s expires first",
+    async (url) => {
+      const fixture = makeSignedFixture();
+      const earlierExpiry = signedFixtureTime + 1_000;
+      const shortResponse = fixture.ocspResponse(url, "byKey", "20250101000001Z");
+      const renewedResponses = new Map<string, Uint8Array>(
+        signedOcspEndpoints.map((endpoint) => [endpoint, fixture.ocspResponse(endpoint, "byKey")]),
+      );
+      let now = signedFixtureTime;
+      const transport = vi.fn(async ({ url: endpoint }: { url: string }) => {
+        if (endpoint === url && now < earlierExpiry) return shortResponse;
+        const response = renewedResponses.get(endpoint);
+        if (response === undefined) throw new Error("unexpected OCSP endpoint");
+        return response;
+      });
+      const verifier = createVerifier({
+        trustedRoots: [fixture.rootDer],
+        clock: () => now,
+        policy: { mode: "online", ocsp: { allowedEndpoints: signedOcspEndpoints } },
+        ocspTransport: transport,
+      });
+
+      await verifier.verify(fixture.signJws({ sequence: 1 }));
+      expect(transport).toHaveBeenCalledTimes(2);
+      now = earlierExpiry - 1;
+      await verifier.verify(fixture.signJws({ sequence: 2 }));
+      expect(transport).toHaveBeenCalledTimes(2);
+      now = earlierExpiry + 1;
+      await verifier.verify(fixture.signJws({ sequence: 3 }));
+      const refreshedEndpoints = transport.mock.calls.slice(2).map(([request]) => request.url);
+      expect(refreshedEndpoints.sort()).toEqual([...signedOcspEndpoints].sort());
+    },
+  );
+
   it("evicts old prepared chains when the cache entry limit is reached", async () => {
     const first = makeSignedFixture();
     const second = makeSignedFixture();
@@ -164,7 +332,7 @@ describe("online OCSP verification", () => {
     await verifier.verify(fixture.signJws({}));
     now -= 61_000;
     await expectCode(verifier.verify(fixture.signJws({})), "ocsp-stale");
-    expect(transport).toHaveBeenCalledTimes(3);
+    expect(transport).toHaveBeenCalledTimes(4);
   });
 
   it("reselects a trusted root when the cached anchor expires", async () => {

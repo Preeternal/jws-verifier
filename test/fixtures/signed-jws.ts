@@ -148,6 +148,7 @@ export const makeSignedFixture = (criticalExtension?: "leaf" | "intermediate") =
   const ocspResponse = (
     url: string,
     scenario: "byKey" | "issuer-name" | "delegate-name" | "unauthorized",
+    nextUpdate = "20250102000000Z",
   ): Buffer => {
     const forLeaf = url === signedOcspEndpoints[0];
     if (!forLeaf && url !== signedOcspEndpoints[1]) throw new Error("Unexpected replay URL");
@@ -188,7 +189,7 @@ export const makeSignedFixture = (criticalExtension?: "leaf" | "intermediate") =
     const data = sequence(
       responder,
       thisUpdate,
-      sequence(sequence(certId, tlv(0x80), thisUpdate, tlv(0xa0, responseTime("20250102000000Z")))),
+      sequence(sequence(certId, tlv(0x80), thisUpdate, tlv(0xa0, responseTime(nextUpdate)))),
     );
     const basic = sequence(
       data,

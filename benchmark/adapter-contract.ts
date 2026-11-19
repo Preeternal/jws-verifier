@@ -16,11 +16,20 @@ export type BenchmarkReplayEntry = Readonly<{
   requestBase64: string;
   responseBase64?: string;
   error?: string;
+  delayMs?: number;
+}>;
+
+export type BenchmarkRequestInterval = Readonly<{
+  url: string;
+  startedAtMs: number;
+  endedAtMs: number;
+  durationMs: number;
 }>;
 
 export type BenchmarkTransport = Readonly<{
   request(url: string, request: Uint8Array): Promise<Uint8Array>;
   readonly requestCount: number;
+  readonly requestIntervals: readonly BenchmarkRequestInterval[];
 }>;
 
 export type BenchmarkAdapterContext = Readonly<{
